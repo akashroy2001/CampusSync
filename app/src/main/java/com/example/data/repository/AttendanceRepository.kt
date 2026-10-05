@@ -43,7 +43,7 @@ class AttendanceRepository(private val context: Context) {
             CourseAttendanceProgress(
                 courseId = entity.id,
                 courseName = entity.courseName,
-                facultyName = entity.facultyName,
+                facultyName = "", // Professor name omitted as requested
                 attendedClasses = entity.attendedClasses,
                 totalConductedClasses = entity.totalConductedClasses,
                 totalTermSessions = entity.totalTermSessions,
@@ -74,27 +74,41 @@ class AttendanceRepository(private val context: Context) {
 
     private suspend fun initRoomDatabase() {
         val existingCourses = dao.getAllCourses()
-        val hasOldTerm1Courses = existingCourses.any {
-            it.courseName.contains("Microeconomics") ||
-            it.courseName.contains("Sustainable") ||
-            it.courseName.contains("Information Technology") ||
-            it.courseName.contains("Written Analysis") ||
-            it.courseName.contains("Statistics") ||
-            it.courseName.contains("Marketing Management I") ||
-            it.courseName.contains("Management Accounting I") ||
-            it.courseName.contains("Organizational Behaviour I")
+        val official = getOfficialTermCourses()
+
+        // Remove any old/invalid courses that don't belong to the official Term II subjects
+        existingCourses.forEach { ext ->
+            val canonical = getCanonicalCourseName(ext.courseName)
+            if (canonical == null) {
+                dao.deleteCourse(ext)
+            }
         }
 
-        if (existingCourses.isEmpty() || hasOldTerm1Courses) {
-            dao.deleteAllCourses()
-            val term2Courses = getOfficialTermCourses()
-            dao.insertCourses(term2Courses.map { CourseAttendanceEntity.fromDomain(it) })
+        // Fetch fresh list after cleanup
+        val currentInDb = dao.getAllCourses()
+
+        // Insert or update all 10 official courses
+        val entitiesToSave = official.map { off ->
+            val match = currentInDb.firstOrNull { matchesCourse(it.courseName, off.courseName) }
+            CourseAttendanceEntity(
+                id = match?.id ?: 0,
+                courseName = off.courseName,
+                facultyName = "", // Professor name omitted
+                attendedClasses = match?.attendedClasses ?: 0,
+                totalConductedClasses = match?.totalConductedClasses ?: 0,
+                totalTermSessions = off.totalTermSessions,
+                requiredThresholdPercentage = MANDATORY_ATTENDANCE_THRESHOLD,
+                isLmsSynced = false,
+                lastUpdatedTimestamp = System.currentTimeMillis()
+            )
         }
 
-        // Keep _attendance updated reactively from Room DB
+        dao.insertCourses(entitiesToSave)
+
+        // Reactive collector keeps _attendance in sync with Room DB
         dao.getAllCoursesFlow().collect { entities ->
             if (entities.isNotEmpty()) {
-                val domainCourses = entities.map { it.toDomain() }
+                val domainCourses = entities.map { it.toDomain().copy(facultyName = "") }
                 val totalAtt = domainCourses.sumOf { it.attendedClasses }
                 val totalCond = domainCourses.sumOf { it.totalConductedClasses }
                 _attendance.value = OverallAttendance(
@@ -128,13 +142,15 @@ class AttendanceRepository(private val context: Context) {
     /**
      * Synchronizes conducted class counts for each Term II subject based on
      * the timetable schedule for current day and all previous days.
+     * Ensures all subjects with 6 or more scheduled classes are visible.
      */
     fun updateFromTimetable(
         schedules: List<DaySchedule>,
         currentDate: LocalDate = LocalDate.now()
     ) {
         latestSchedules = schedules
-        val courseStats = mutableMapOf<String, Pair<Int, String>>()
+        val conductedCounts = mutableMapOf<String, Int>()
+        val totalScheduledCounts = mutableMapOf<String, Int>()
         val dtf1 = DateTimeFormatter.ofPattern("dd-MM-yyyy")
         val dtf2 = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
@@ -145,37 +161,56 @@ class AttendanceRepository(private val context: Context) {
                 try { LocalDate.parse(day.dateStr, dtf2) } catch (e2: Exception) { null }
             }
 
-            // Sync with current day and all previous classes of that subject
+            for (item in day.classes) {
+                if (item.isHoliday || item.isFreePeriod || item.courseName.isBlank()) continue
+                val canonical = getCanonicalCourseName(item.courseName)
+                if (canonical != null) {
+                    totalScheduledCounts[canonical] = (totalScheduledCounts[canonical] ?: 0) + 1
+                }
+            }
+
+            // Sync conducted count up to currentDate (current day and all previous classes)
             val isPastOrToday = parsedDate != null && !parsedDate.isAfter(currentDate)
 
             if (isPastOrToday) {
                 for (item in day.classes) {
                     if (item.isHoliday || item.isFreePeriod || item.courseName.isBlank()) continue
-                    val cleanName = cleanCourseTitle(item.courseName)
-                    val existing = courseStats[cleanName] ?: (0 to item.facultyName)
-                    val faculty = if (existing.second.isNotBlank()) existing.second else item.facultyName
-                    courseStats[cleanName] = (existing.first + 1 to faculty)
+                    val canonical = getCanonicalCourseName(item.courseName)
+                    if (canonical != null) {
+                        conductedCounts[canonical] = (conductedCounts[canonical] ?: 0) + 1
+                    }
                 }
             }
         }
 
         scope.launch {
             val existingEntities = dao.getAllCourses()
-            val officialCourses = getOfficialTermCourses()
+            val baseList = getOfficialTermCourses().toMutableList()
 
-            val updatedEntities = officialCourses.map { official ->
-                val stats = courseStats.entries.firstOrNull { matchesCourse(it.key, official.courseName) }?.value
-                val conducted = stats?.first ?: 0
-                val faculty = if (!stats?.second.isNullOrBlank()) stats!!.second else official.facultyName
+            // Include any additional subjects in schedule having 6 or more total classes
+            totalScheduledCounts.forEach { (name, count) ->
+                if (count >= 6 && baseList.none { matchesCourse(it.courseName, name) }) {
+                    baseList.add(
+                        CourseAttendance(
+                            courseName = name,
+                            facultyName = "",
+                            attendedClasses = 0,
+                            totalConductedClasses = 0,
+                            totalTermSessions = count,
+                            isLmsSynced = false
+                        )
+                    )
+                }
+            }
 
+            val updatedEntities = baseList.map { official ->
+                val conducted = conductedCounts[official.courseName] ?: 0
                 val existing = existingEntities.firstOrNull { matchesCourse(it.courseName, official.courseName) }
 
                 val attended = if (existing != null) {
                     if (existing.totalConductedClasses == 0 && conducted > 0) {
-                        // Newly conducted classes default to full attendance
-                        conducted
+                        conducted // Default to full attendance for conducted classes
                     } else {
-                        // Preserve user's manual selection, bounded between 0 and conducted
                         existing.attendedClasses.coerceIn(0, conducted)
                     }
                 } else {
@@ -185,7 +220,7 @@ class AttendanceRepository(private val context: Context) {
                 CourseAttendanceEntity(
                     id = existing?.id ?: 0,
                     courseName = official.courseName,
-                    facultyName = faculty,
+                    facultyName = "", // Professor name omitted
                     attendedClasses = attended,
                     totalConductedClasses = conducted,
                     totalTermSessions = official.totalTermSessions,
@@ -216,14 +251,15 @@ class AttendanceRepository(private val context: Context) {
      */
     fun setCourseAttendedCount(courseName: String, attended: Int) {
         scope.launch {
-            val entity = dao.getCourseByName(courseName) ?: return@launch
+            val existingList = dao.getAllCourses()
+            val entity = existingList.firstOrNull { matchesCourse(it.courseName, courseName) } ?: return@launch
             val clamped = attended.coerceIn(0, entity.totalConductedClasses)
             dao.updateAttendanceCounts(entity.id, clamped, entity.totalConductedClasses)
 
             dao.insertLog(
                 AttendanceLogEntity(
                     courseId = entity.id,
-                    courseName = courseName,
+                    courseName = entity.courseName,
                     dateStr = LocalDate.now().toString(),
                     wasAttended = clamped == entity.totalConductedClasses,
                     note = "$clamped/${entity.totalConductedClasses} present"
@@ -245,42 +281,41 @@ class AttendanceRepository(private val context: Context) {
     }
 
     /**
-     * Update attended and conducted numbers directly from edit dialog.
+     * Quick toggle / increment
      */
-    fun updateSingleSubject(courseName: String, attended: Int, conducted: Int, faculty: String = "") {
+    fun markAttendance(courseName: String, isPresent: Boolean) {
         scope.launch {
-            val existing = dao.getCourseByName(courseName)
-            val cleanCond = conducted.coerceAtLeast(0)
-            val cleanAtt = attended.coerceIn(0, cleanCond)
-
-            if (existing != null) {
-                val updated = existing.copy(
-                    attendedClasses = cleanAtt,
-                    totalConductedClasses = cleanCond,
-                    facultyName = if (faculty.isNotBlank()) faculty else existing.facultyName,
-                    lastUpdatedTimestamp = System.currentTimeMillis()
-                )
-                dao.updateCourse(updated)
+            val existingList = dao.getAllCourses()
+            val entity = existingList.firstOrNull { matchesCourse(it.courseName, courseName) } ?: return@launch
+            val conducted = entity.totalConductedClasses.coerceAtLeast(1)
+            val newAttended = if (isPresent) {
+                (entity.attendedClasses + 1).coerceAtMost(conducted)
             } else {
-                dao.insertCourse(
-                    CourseAttendanceEntity(
-                        courseName = courseName,
-                        facultyName = faculty,
-                        attendedClasses = cleanAtt,
-                        totalConductedClasses = cleanCond,
-                        totalTermSessions = 20,
-                        lastUpdatedTimestamp = System.currentTimeMillis()
-                    )
-                )
+                (entity.attendedClasses - 1).coerceAtLeast(0)
             }
+            setCourseAttendedCount(entity.courseName, newAttended)
+        }
+    }
+
+    fun markAttendance(courseId: Long, isPresent: Boolean) {
+        scope.launch {
+            val entity = dao.getCourseById(courseId) ?: return@launch
+            markAttendance(entity.courseName, isPresent)
+        }
+    }
+
+    fun updateCourseManual(courseName: String, attended: Int, conducted: Int) {
+        scope.launch {
+            val existingList = dao.getAllCourses()
+            val entity = existingList.firstOrNull { matchesCourse(it.courseName, courseName) } ?: return@launch
+            val safeCond = conducted.coerceAtLeast(0)
+            val safeAtt = attended.coerceIn(0, safeCond)
+
+            dao.updateAttendanceCounts(entity.id, safeAtt, safeCond)
 
             val currentList = _attendance.value.courses.map { c ->
                 if (matchesCourse(c.courseName, courseName)) {
-                    c.copy(
-                        attendedClasses = cleanAtt,
-                        totalConductedClasses = cleanCond,
-                        facultyName = if (faculty.isNotBlank()) faculty else c.facultyName
-                    )
+                    c.copy(attendedClasses = safeAtt, totalConductedClasses = safeCond)
                 } else c
             }
             _attendance.value = _attendance.value.copy(
@@ -291,81 +326,45 @@ class AttendanceRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Quick mark attendance (+1 attended if present, +1 conducted).
-     */
-    suspend fun markAttendance(courseId: Long, attended: Boolean, note: String = "") {
-        withContext(Dispatchers.IO) {
-            val entity = dao.getCourseById(courseId) ?: return@withContext
-            val newAttended = if (attended) entity.attendedClasses + 1 else entity.attendedClasses
-            val newConducted = entity.totalConductedClasses + 1
-            dao.updateAttendanceCounts(courseId, newAttended, newConducted)
-
-            val todayStr = LocalDate.now().toString()
-            dao.insertLog(
-                AttendanceLogEntity(
-                    courseId = courseId,
-                    courseName = entity.courseName,
-                    dateStr = todayStr,
-                    wasAttended = attended,
-                    note = note
-                )
-            )
-        }
+    fun updateSingleSubject(courseName: String, attended: Int, conducted: Int) {
+        updateCourseManual(courseName, attended, conducted)
     }
 
-    suspend fun updateCourseDetails(
+    fun updateCourseDetails(
         courseId: Long,
         attended: Int,
         conducted: Int,
         totalSessions: Int = 20,
         facultyName: String? = null
     ) {
-        withContext(Dispatchers.IO) {
-            val entity = dao.getCourseById(courseId) ?: return@withContext
-            val updated = entity.copy(
-                attendedClasses = attended.coerceIn(0, conducted),
-                totalConductedClasses = conducted.coerceAtLeast(0),
-                totalTermSessions = totalSessions,
-                facultyName = facultyName ?: entity.facultyName,
-                lastUpdatedTimestamp = System.currentTimeMillis()
-            )
-            dao.updateCourse(updated)
+        scope.launch {
+            val entity = dao.getCourseById(courseId) ?: return@launch
+            updateCourseManual(entity.courseName, attended, conducted)
         }
     }
 
-    suspend fun addCourse(
-        courseName: String,
-        facultyName: String = "",
-        attended: Int = 0,
-        conducted: Int = 0,
-        totalSessions: Int = 20
-    ): Long {
-        return withContext(Dispatchers.IO) {
-            val entity = CourseAttendanceEntity(
-                courseName = cleanCourseTitle(courseName),
-                facultyName = facultyName,
-                attendedClasses = attended.coerceIn(0, conducted),
-                totalConductedClasses = conducted.coerceAtLeast(0),
-                totalTermSessions = totalSessions,
-                isLmsSynced = false
-            )
-            dao.insertCourse(entity)
-        }
-    }
-
-    suspend fun deleteCourse(courseId: Long) {
-        withContext(Dispatchers.IO) {
-            dao.deleteCourseById(courseId)
+    fun deleteCourse(courseId: Long) {
+        scope.launch {
+            val entity = dao.getCourseById(courseId) ?: return@launch
+            deleteCourse(entity.courseName)
         }
     }
 
     fun deleteCourseByName(courseName: String) {
+        deleteCourse(courseName)
+    }
+
+    fun deleteCourse(courseName: String) {
         scope.launch {
-            val entity = dao.getCourseByName(courseName)
-            if (entity != null) {
-                dao.deleteCourseById(entity.id)
-            }
+            val existingList = dao.getAllCourses()
+            val entity = existingList.firstOrNull { matchesCourse(it.courseName, courseName) } ?: return@launch
+            dao.deleteCourse(entity)
+            val currentList = _attendance.value.courses.filter { !matchesCourse(it.courseName, courseName) }
+            _attendance.value = _attendance.value.copy(
+                totalAttended = currentList.sumOf { it.attendedClasses },
+                totalConducted = currentList.sumOf { it.totalConductedClasses },
+                courses = currentList
+            )
         }
     }
 
@@ -377,13 +376,13 @@ class AttendanceRepository(private val context: Context) {
             scope.launch {
                 dao.deleteAllCourses()
                 dao.insertCourses(official.map { CourseAttendanceEntity.fromDomain(it) })
+                _attendance.value = OverallAttendance(
+                    totalAttended = 0,
+                    totalConducted = 0,
+                    courses = official,
+                    syncStatusText = "Term II Schedule Synced"
+                )
             }
-            _attendance.value = OverallAttendance(
-                totalAttended = 0,
-                totalConducted = 0,
-                courses = official,
-                syncStatusText = "Term II Attendance Reset"
-            )
         }
     }
 
@@ -397,19 +396,55 @@ class AttendanceRepository(private val context: Context) {
         )
     }
 
+    /**
+     * All subjects in Term II schedule that have 6 or more classes.
+     * Total sessions from timetable:
+     * - Marketing Management II: 20
+     * - Macroeconomics: 20
+     * - Operations Research: 20
+     * - Financial Management I: 15
+     * - Organizational Behaviour II: 10
+     * - Design Thinking: 10
+     * - Management Accounting II: 10
+     * - Entrepreneurship: 10
+     * - Human Resource Management: 10
+     * - Workshops on Interviews and Presentations: 7
+     */
     fun getOfficialTermCourses(): List<CourseAttendance> {
         return listOf(
-            CourseAttendance("Marketing Management II", "Prof. Chandan Parsad", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
-            CourseAttendance("Workshops on Interviews and Presentations", "Prof. Anamita Guha", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 7, isLmsSynced = false),
-            CourseAttendance("Macroeconomics", "Prof. Gupteswar Patel", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
-            CourseAttendance("Organizational Behaviour II", "Prof. Sudipt Kumar", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
-            CourseAttendance("Financial Management I", "Prof. Bharati Singh", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 15, isLmsSynced = false),
-            CourseAttendance("Operations Research", "Prof. Rohit Agrawal", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
-            CourseAttendance("Design Thinking", "Prof. Bishal Dey Sarkar", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
-            CourseAttendance("Management Accounting II", "Prof. Archana Patro", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
-            CourseAttendance("Entrepreneurship", "Prof. Sunil Kumar Yadav", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
-            CourseAttendance("Human Resource Management", "Prof. Abhyudaya Anand Mishra", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false)
+            CourseAttendance("Marketing Management II", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
+            CourseAttendance("Macroeconomics", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
+            CourseAttendance("Operations Research", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
+            CourseAttendance("Financial Management I", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 15, isLmsSynced = false),
+            CourseAttendance("Organizational Behaviour II", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Design Thinking", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Management Accounting II", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Entrepreneurship", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Human Resource Management", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Workshops on Interviews and Presentations", "", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 7, isLmsSynced = false)
         )
+    }
+
+    /**
+     * Maps raw or partial course strings from the schedule to the canonical subject name.
+     * Prevents collisions between subjects containing similar words (e.g. Management, Macro).
+     */
+    fun getCanonicalCourseName(rawName: String): String? {
+        val clean = cleanCourseTitle(rawName)
+        val lower = clean.lowercase(Locale.ROOT).trim()
+        return when {
+            lower.contains("marketing") || lower.contains("mm ii") || lower.contains("mm-") -> "Marketing Management II"
+            lower.contains("macro") -> "Macroeconomics"
+            lower.contains("operations") || lower.contains("research") || lower == "or" -> "Operations Research"
+            lower.contains("financial") || lower.contains("finance") || lower.contains("fm i") || lower.contains("fm-") -> "Financial Management I"
+            lower.contains("organizational") || lower.contains("behaviour") || lower.contains("behavior") || lower.contains("ob ii") || lower.contains("ob-") -> "Organizational Behaviour II"
+            lower.contains("design") || lower.contains("thinking") || lower == "dt" -> "Design Thinking"
+            lower.contains("accounting") || lower.contains("management accounting") -> "Management Accounting II"
+            lower.contains("entrepreneur") -> "Entrepreneurship"
+            lower.contains("human resource") || lower.contains("resource management") || lower == "hrm" -> "Human Resource Management"
+            lower.contains("workshop") || lower.contains("interview") || lower.contains("presentation") || lower == "wip" -> "Workshops on Interviews and Presentations"
+            else -> null
+        }
     }
 
     fun cleanCourseTitle(title: String): String {
@@ -425,59 +460,15 @@ class AttendanceRepository(private val context: Context) {
         return clean.ifBlank { title.trim() }
     }
 
-    fun matchesCourse(canonicalName: String, otherName: String): Boolean {
-        val c1 = canonicalName.lowercase(Locale.ROOT).trim()
-        val c2 = otherName.lowercase(Locale.ROOT).trim()
-        if (c1 == c2) return true
-        if (c1.contains(c2) || c2.contains(c1)) return true
-
-        fun norm(s: String) = s.replace(Regex("[^a-z0-9]"), "")
-        val n1 = norm(c1)
-        val n2 = norm(c2)
-        if (n1 == n2 || n1.contains(n2) || n2.contains(n1)) return true
-
-        // MBA Term II Specific Domain Aliases
-        val isMkt1 = c1.contains("marketing") || c1.contains("mm")
-        val isMkt2 = c2.contains("marketing") || c2.contains("mm")
-        if (isMkt1 && isMkt2) return true
-
-        val isWip1 = c1.contains("workshop") || c1.contains("interview") || c1.contains("presentation") || c1.contains("wip")
-        val isWip2 = c2.contains("workshop") || c2.contains("interview") || c2.contains("presentation") || c2.contains("wip")
-        if (isWip1 && isWip2) return true
-
-        val isMacro1 = c1.contains("macro")
-        val isMacro2 = c2.contains("macro")
-        if (isMacro1 && isMacro2) return true
-
-        val isOb1 = (c1.contains("behav") || c1.contains("ob"))
-        val isOb2 = (c2.contains("behav") || c2.contains("ob"))
-        if (isOb1 && isOb2) return true
-
-        val isFm1 = c1.contains("financial") || c1.contains("fm")
-        val isFm2 = c2.contains("financial") || c2.contains("fm")
-        if (isFm1 && isFm2) return true
-
-        val isOr1 = c1.contains("operations") || c1.contains("research") || c1 == "or"
-        val isOr2 = c2.contains("operations") || c2.contains("research") || c2 == "or"
-        if (isOr1 && isOr2) return true
-
-        val isDt1 = c1.contains("design") || c1.contains("thinking") || c1 == "dt"
-        val isDt2 = c2.contains("design") || c2.contains("thinking") || c2 == "dt"
-        if (isDt1 && isDt2) return true
-
-        val isMa1 = c1.contains("accounting") || c1.contains("ma")
-        val isMa2 = c2.contains("accounting") || c2.contains("ma")
-        if (isMa1 && isMa2) return true
-
-        val isEnt1 = c1.contains("entrepreneur") || c1.contains("entre")
-        val isEnt2 = c2.contains("entrepreneur") || c2.contains("entre")
-        if (isEnt1 && isEnt2) return true
-
-        val isHrm1 = c1.contains("human resource") || c1.contains("hrm") || c1.contains("hr")
-        val isHrm2 = c2.contains("human resource") || c2.contains("hrm") || c2.contains("hr")
-        if (isHrm1 && isHrm2) return true
-
-        return false
+    fun matchesCourse(name1: String, name2: String): Boolean {
+        val c1 = getCanonicalCourseName(name1)
+        val c2 = getCanonicalCourseName(name2)
+        if (c1 != null && c2 != null) {
+            return c1 == c2
+        }
+        val clean1 = cleanCourseTitle(name1).lowercase(Locale.ROOT)
+        val clean2 = cleanCourseTitle(name2).lowercase(Locale.ROOT)
+        return clean1 == clean2
     }
 
     companion object {

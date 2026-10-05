@@ -77,16 +77,15 @@ import com.example.ui.theme.LocalDayProfile
 import java.util.Locale
 
 private val EmeraldGreen = Color(0xFF10B981)
-private val WarningAmber = Color(0xFFF59E0B)
 private val AlertRed = Color(0xFFEF4444)
 
 /**
  * Term II Attendance Screen:
- * - Direct, clean subject attendance tracker.
+ * - Direct, clean subject attendance tracker showing all curriculum subjects with 6+ classes.
  * - Synced with timetable schedule for conducted class counts.
+ * - Displays only subject names (professor names omitted as requested).
  * - 1-tap options matching the conducted classes (e.g. 2/2 Present, 1/2 Present, 0/2 Present).
  * - Individual safe zone status per subject (80% benchmark).
- * - No aggregated summary section or external portal dependencies.
  */
 @Composable
 fun AttendanceScreen(
@@ -114,8 +113,7 @@ fun AttendanceScreen(
                 else -> true
             }
             val matchesQuery = searchQuery.isBlank() ||
-                course.courseName.contains(searchQuery, ignoreCase = true) ||
-                course.facultyName.contains(searchQuery, ignoreCase = true)
+                course.courseName.contains(searchQuery, ignoreCase = true)
             matchesFilter && matchesQuery
         }
     }
@@ -166,7 +164,7 @@ fun AttendanceScreen(
                         }
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = "Synced with schedule • Tap attendance option per course",
+                            text = "Synced with schedule • Tap attendance option per subject",
                             color = DarkTextSecondary,
                             fontSize = 12.sp
                         )
@@ -195,7 +193,7 @@ fun AttendanceScreen(
                         .height(50.dp)
                         .testTag("attendance_search_field"),
                     placeholder = {
-                        Text("Search Term II courses or professors...", fontSize = 13.sp, color = DarkTextTertiary)
+                        Text("Search Term II courses...", fontSize = 13.sp, color = DarkTextTertiary)
                     },
                     leadingIcon = {
                         Icon(
@@ -263,7 +261,7 @@ fun AttendanceScreen(
                 }
             }
 
-            // Clean list of Subject Cards
+            // Clean list of Subject Cards (Showing all subjects having 6+ scheduled classes)
             items(filteredCourses, key = { it.courseName }) { course ->
                 TermIICourseCard(
                     course = course,
@@ -328,7 +326,7 @@ private fun AttendanceFilterChip(
 /**
  * Clean, spacious, uncluttered card for each Term II Course.
  * Shows:
- * 1. Course title & professor
+ * 1. Course title (professor name omitted as requested)
  * 2. Individual % and SAFE ZONE / SHORTAGE indicator
  * 3. Schedule context: classes done so far
  * 4. Manual options synced to conducted count (e.g. 2/2 Present, 1/2 Present, 0/2 Present)
@@ -374,7 +372,7 @@ private fun TermIICourseCard(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
-            // Header Row: Subject Name, Faculty Name, and Percentage Badge
+            // Header Row: Subject Name and Percentage Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -386,17 +384,8 @@ private fun TermIICourseCard(
                         color = DarkTextPrimary,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        lineHeight = 21.sp
+                        lineHeight = 22.sp
                     )
-
-                    if (course.facultyName.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = course.facultyName,
-                            color = DarkTextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -545,7 +534,6 @@ private fun TermIICourseCard(
             Spacer(modifier = Modifier.height(14.dp))
 
             // MANUAL ATTENDANCE SELECTION
-            // Synced to the current day and all previous classes of that subject
             Text(
                 text = "Attendance Selection:",
                 color = DarkTextSecondary,
@@ -573,7 +561,7 @@ private fun TermIICourseCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "No classes conducted yet • Attendance options unlock once first lecture begins",
+                            text = "No classes conducted yet • Options unlock once first lecture begins",
                             color = DarkTextTertiary,
                             fontSize = 11.sp
                         )
@@ -581,7 +569,6 @@ private fun TermIICourseCard(
                 }
             } else if (conducted in 1..4) {
                 // Show clean options for each possible attendance count
-                // e.g. for conducted == 2: "2/2 Present (100%)", "1/2 Present (50%)", "0/2 Present (0%)"
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -768,7 +755,7 @@ private fun CourseAttendanceEditDialog(
         text = {
             Column {
                 Text(
-                    text = "Update the exact session numbers for this course:",
+                    text = "Update session numbers for this subject:",
                     color = DarkTextSecondary,
                     fontSize = 12.sp
                 )

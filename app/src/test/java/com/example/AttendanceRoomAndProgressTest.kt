@@ -153,4 +153,41 @@ class AttendanceRoomAndProgressTest {
         assertEquals(13, overall.totalMissed)
         assertTrue(overall.overallSafeBunks >= 0)
     }
+
+    @Test
+    fun testAllTermIISubjectsWith6OrMoreClassesArePresentAndNoCollisions() {
+        val repo = com.example.data.repository.AttendanceRepository(ApplicationProvider.getApplicationContext())
+        val officialCourses = repo.getOfficialTermCourses()
+
+        // All 10 curriculum subjects with 6+ scheduled sessions must be present
+        val expectedSubjects = listOf(
+            "Marketing Management II",
+            "Macroeconomics",
+            "Operations Research",
+            "Financial Management I",
+            "Organizational Behaviour II",
+            "Design Thinking",
+            "Management Accounting II",
+            "Entrepreneurship",
+            "Human Resource Management",
+            "Workshops on Interviews and Presentations"
+        )
+
+        assertEquals(10, officialCourses.size)
+        expectedSubjects.forEach { expected ->
+            val match = officialCourses.find { it.courseName == expected }
+            assertTrue("Subject $expected must be in official courses", match != null)
+            assertTrue("Sessions for $expected should be >= 6", match!!.totalTermSessions >= 6)
+            assertTrue("Professor name must be omitted for $expected", match.facultyName.isEmpty())
+        }
+
+        // Verify canonical matching has no cross-subject collisions
+        for (i in expectedSubjects.indices) {
+            for (j in i + 1 until expectedSubjects.size) {
+                val s1 = expectedSubjects[i]
+                val s2 = expectedSubjects[j]
+                assertFalse("Collision between '$s1' and '$s2'", repo.matchesCourse(s1, s2))
+            }
+        }
+    }
 }

@@ -234,16 +234,18 @@ class ScheduleRepository(private val context: Context) {
 
         // Helper to find next upcoming lecture from tomorrow onwards (up to 7 days ahead)
         fun findTomorrowOrNextLecture(): Pair<ScheduleClass?, String?> {
+            val dtf = DateTimeFormatter.ofPattern("dd MMM")
             for (offset in 1..7) {
                 val futureDate = targetDate.plusDays(offset.toLong())
                 val futureSchedule = getUpdatedDaySchedule(futureDate, LocalTime.MIN)
                 if (futureSchedule != null && !futureSchedule.isHoliday) {
                     val candidate = futureSchedule.classes.firstOrNull { !it.isFreePeriod && !it.isHoliday }
                     if (candidate != null) {
+                        val formattedDate = futureDate.format(dtf)
                         val label = if (offset == 1) {
-                            "Tomorrow (${futureSchedule.dayName}, ${futureSchedule.dateStr})"
+                            "Tomorrow, $formattedDate"
                         } else {
-                            "${futureSchedule.dayName} (${futureSchedule.dateStr})"
+                            "${futureSchedule.dayName}, $formattedDate"
                         }
                         return Pair(candidate, label)
                     }

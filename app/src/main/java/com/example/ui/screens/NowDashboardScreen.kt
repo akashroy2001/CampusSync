@@ -19,11 +19,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AssignmentTurnedIn
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Celebration
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.School
@@ -42,6 +45,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MealStatus
@@ -56,6 +60,7 @@ import com.example.ui.theme.DarkSurfaceCard
 import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.DarkTextPrimary
 import com.example.ui.theme.DarkTextSecondary
+import com.example.ui.theme.DarkTextTertiary
 import com.example.ui.theme.LocalDayProfile
 import com.example.ui.theme.UpNextAmber
 import java.time.LocalDate
@@ -159,7 +164,9 @@ fun NowDashboardScreen(
                         },
                         color = Color.White,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
@@ -259,53 +266,104 @@ fun NowDashboardScreen(
                         }
                     }
                 } else if (relevantClass != null) {
+                    // Header row: Slot time tag and status badge with ample spacing
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Slot ${relevantClass.slot.slotNumber} • ${relevantClass.slot.timeRange}",
-                            color = DarkTextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(0.5.dp, DarkSurfaceBorder, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccessTime,
+                                contentDescription = null,
+                                tint = DarkTextSecondary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Slot ${relevantClass.slot.slotNumber}  •  ${relevantClass.slot.timeRange}",
+                                color = DarkTextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
 
                         ClassStatusBadge(status = relevantClass.status)
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
                         text = relevantClass.courseName.ifBlank { "Class Lecture" },
                         color = if (activeClassInfo?.isClassLiveNow == true) Color.White else DarkTextPrimary,
                         fontSize = if (activeClassInfo?.isClassLiveNow == true) 18.sp else 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 24.sp
                     )
 
-                    if (relevantClass.sessionNumber.isNotBlank()) {
-                        Text(
-                            text = "Session: ${relevantClass.sessionNumber}",
-                            color = dayProfile.primaryAccent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-
-                    if (relevantClass.facultyName.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = relevantClass.facultyName,
-                            color = DarkTextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Normal
-                        )
+                    if (relevantClass.sessionNumber.isNotBlank() || relevantClass.facultyName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (relevantClass.sessionNumber.isNotBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
+                                        .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "Session ${relevantClass.sessionNumber}",
+                                        color = dayProfile.primaryAccent,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            if (relevantClass.facultyName.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = DarkTextTertiary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = relevantClass.facultyName,
+                                        color = DarkTextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Active progress bar if live now
                     if (activeClassInfo?.isClassLiveNow == true) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -322,7 +380,7 @@ fun NowDashboardScreen(
                             )
                         }
 
-                        // Next Upcoming Class (or Tomorrow's class if this is the final class today)
+                        // Next Upcoming Class Today
                         val upcomingToday = activeClassInfo.nextClass
                         if (upcomingToday != null) {
                             Spacer(modifier = Modifier.height(14.dp))
@@ -332,60 +390,59 @@ fun NowDashboardScreen(
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(DarkSurfaceElevated)
                                     .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
+                                    .padding(14.dp)
                             ) {
-                                Column {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.Default.Schedule,
-                                                contentDescription = null,
-                                                tint = UpNextAmber,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(UpNextAmber.copy(alpha = 0.15f))
+                                                .border(0.5.dp, UpNextAmber.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        ) {
                                             Text(
-                                                text = "NEXT CLASS • Slot ${upcomingToday.slot.slotNumber}",
+                                                text = "UP NEXT TODAY",
                                                 color = UpNextAmber,
-                                                fontSize = 11.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 letterSpacing = 0.5.sp
                                             )
                                         }
 
-                                        val timeDesc = if (upcomingToday.minutesUntilStart > 0) {
-                                            "${upcomingToday.slot.formattedStartTime} (in ${upcomingToday.minutesUntilStart}m)"
-                                        } else {
-                                            upcomingToday.slot.timeRange
-                                        }
                                         Text(
-                                            text = timeDesc,
-                                            color = DarkTextPrimary,
+                                            text = if (upcomingToday.minutesUntilStart > 0) {
+                                                "Slot ${upcomingToday.slot.slotNumber}  •  In ${upcomingToday.minutesUntilStart}m"
+                                            } else {
+                                                "Slot ${upcomingToday.slot.slotNumber}  •  ${upcomingToday.slot.formattedStartTime}"
+                                            },
+                                            color = DarkTextSecondary,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
 
                                     Text(
                                         text = upcomingToday.courseName.ifBlank { "Upcoming Class" },
                                         color = DarkTextPrimary,
                                         fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.Bold,
+                                        lineHeight = 19.sp
                                     )
 
-                                    val nextMeta = listOf(
+                                    val nextMeta = listOfNotNull(
                                         if (upcomingToday.sessionNumber.isNotBlank()) "Session ${upcomingToday.sessionNumber}" else null,
                                         if (upcomingToday.facultyName.isNotBlank()) upcomingToday.facultyName else null
-                                    ).filterNotNull().joinToString(" • ")
+                                    ).joinToString("  •  ")
 
                                     if (nextMeta.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Spacer(modifier = Modifier.height(5.dp))
                                         Text(
                                             text = nextMeta,
                                             color = DarkTextSecondary,
@@ -403,24 +460,27 @@ fun NowDashboardScreen(
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(DarkSurfaceElevated)
                                     .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
+                                    .padding(14.dp)
                             ) {
-                                Column {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.Default.Schedule,
-                                                contentDescription = null,
-                                                tint = dayProfile.primaryAccent,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
+                                                .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        ) {
                                             Text(
-                                                text = "NEXT: ${activeClassInfo.tomorrowDateText?.uppercase() ?: "TOMORROW"}",
+                                                text = if (!activeClassInfo.tomorrowDateText.isNullOrBlank()) {
+                                                    activeClassInfo.tomorrowDateText.uppercase()
+                                                } else {
+                                                    "NEXT LECTURE"
+                                                },
                                                 color = dayProfile.primaryAccent,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -429,21 +489,36 @@ fun NowDashboardScreen(
                                         }
 
                                         Text(
-                                            text = "Slot ${tom.slot.slotNumber} • ${tom.slot.formattedStartTime}",
-                                            color = DarkTextPrimary,
+                                            text = "Slot ${tom.slot.slotNumber}  •  ${tom.slot.formattedStartTime}",
+                                            color = DarkTextSecondary,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
 
                                     Text(
                                         text = tom.courseName,
                                         color = DarkTextPrimary,
                                         fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.Bold,
+                                        lineHeight = 19.sp
                                     )
+
+                                    val tomMeta = listOfNotNull(
+                                        if (tom.sessionNumber.isNotBlank()) "Session ${tom.sessionNumber}" else null,
+                                        if (tom.facultyName.isNotBlank()) tom.facultyName else null
+                                    ).joinToString("  •  ")
+
+                                    if (tomMeta.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(5.dp))
+                                        Text(
+                                            text = tomMeta,
+                                            color = DarkTextSecondary,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -460,25 +535,26 @@ fun NowDashboardScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(DarkSurfaceElevated)
+                                    .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = null,
                                     tint = dayProfile.primaryAccent,
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "No More Lectures Today",
+                                    text = "All Lectures Concluded",
                                     color = DarkTextPrimary,
-                                    fontSize = 16.sp,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "All scheduled classes have concluded.",
+                                    text = "Classes are completed for today",
                                     color = DarkTextSecondary,
                                     fontSize = 12.sp
                                 )
@@ -494,11 +570,11 @@ fun NowDashboardScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(dayProfile.primaryAccent.copy(alpha = 0.08f))
+                                    .background(DarkSurfaceElevated)
                                     .border(1.dp, dayProfile.primaryAccent.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
                                     .padding(14.dp)
                             ) {
-                                Column {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -508,10 +584,15 @@ fun NowDashboardScreen(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
+                                                .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                                         ) {
                                             Text(
-                                                text = "NEXT: ${activeClassInfo.tomorrowDateText?.uppercase() ?: "TOMORROW"}",
+                                                text = if (!activeClassInfo.tomorrowDateText.isNullOrBlank()) {
+                                                    activeClassInfo.tomorrowDateText.uppercase()
+                                                } else {
+                                                    "NEXT LECTURE"
+                                                },
                                                 color = dayProfile.primaryAccent,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -520,9 +601,9 @@ fun NowDashboardScreen(
                                         }
 
                                         Text(
-                                            text = "Slot ${tomClass.slot.slotNumber} • ${tomClass.slot.timeRange}",
-                                            color = DarkTextPrimary,
-                                            fontSize = 12.sp,
+                                            text = "Slot ${tomClass.slot.slotNumber}  •  ${tomClass.slot.timeRange}",
+                                            color = DarkTextSecondary,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
@@ -533,16 +614,17 @@ fun NowDashboardScreen(
                                         text = tomClass.courseName.ifBlank { "Scheduled Class" },
                                         color = DarkTextPrimary,
                                         fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        lineHeight = 20.sp
                                     )
 
-                                    val meta = listOf(
+                                    val meta = listOfNotNull(
                                         if (tomClass.sessionNumber.isNotBlank()) "Session ${tomClass.sessionNumber}" else null,
                                         if (tomClass.facultyName.isNotBlank()) tomClass.facultyName else null
-                                    ).filterNotNull().joinToString(" • ")
+                                    ).joinToString("  •  ")
 
                                     if (meta.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Spacer(modifier = Modifier.height(5.dp))
                                         Text(
                                             text = meta,
                                             color = DarkTextSecondary,
