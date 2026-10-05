@@ -154,7 +154,7 @@ fun SettingsBottomSheet(
                                 color = DarkTextPrimary
                             )
                             Text(
-                                text = if (isUsingCustomSchedule) "Custom Imported Timetable" else "MBA 2026-28 • Term I (Google Sheet)",
+                                text = if (isUsingCustomSchedule) "Custom Imported Timetable" else "MBA 2026-28 • Term II (Google Sheet)",
                                 fontSize = 12.sp,
                                 color = if (isUsingCustomSchedule) dayProfile.primaryAccent else DarkTextSecondary
                             )
@@ -352,7 +352,7 @@ fun SettingsBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "CampusSync v1.2 • Synced to Term I Schedule & Central Mess Menu",
+                        text = "CampusSync v1.2 • Synced to Term II Schedule & Central Mess Menu",
                         fontSize = 11.sp,
                         color = DarkTextTertiary
                     )

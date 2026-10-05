@@ -83,11 +83,23 @@ class AttendanceRepository(private val context: Context) {
     }
 
     private suspend fun initRoomDatabase() {
-        val count = dao.getCourseCount()
-        if (count == 0) {
-            val initialCourses = _attendance.value.courses.ifEmpty { getOfficialTermCourses() }
-            val entities = initialCourses.map { CourseAttendanceEntity.fromDomain(it) }
-            dao.insertCourses(entities)
+        val existingCourses = dao.getAllCourses()
+        val hasOldTerm1Courses = existingCourses.any {
+            it.courseName.contains("Microeconomics") ||
+            it.courseName.contains("Sustainable") ||
+            it.courseName.contains("Information Technology") ||
+            it.courseName.contains("Written Analysis") ||
+            it.courseName.contains("Statistics") ||
+            it.courseName.contains("Marketing Management I") ||
+            it.courseName.contains("Management Accounting I") ||
+            it.courseName.contains("Organizational Behaviour I")
+        }
+
+        if (existingCourses.isEmpty() || hasOldTerm1Courses) {
+            dao.deleteAllCourses()
+            val term2Courses = getOfficialTermCourses()
+            dao.insertCourses(term2Courses.map { CourseAttendanceEntity.fromDomain(it) })
+            prefs.edit().remove(KEY_LMS_COURSES_JSON).remove(KEY_HAS_CUSTOM_LMS_DATA).apply()
         }
 
         // Keep _attendance updated reactively from Room DB
@@ -461,7 +473,7 @@ class AttendanceRepository(private val context: Context) {
             courses = official,
             lastSyncTimestampMillis = now,
             isLmsConnected = true,
-            syncStatusText = "Restored all 8 subjects with Term I records"
+            syncStatusText = "Restored all 10 subjects with Term II records"
         )
 
         scope.launch {
@@ -514,7 +526,7 @@ class AttendanceRepository(private val context: Context) {
     private fun loadStoredAttendance(): OverallAttendance {
         val jsonString = prefs.getString(KEY_LMS_COURSES_JSON, null)
         val lastSync = prefs.getLong(KEY_LAST_LMS_SYNC_TIMESTAMP, System.currentTimeMillis())
-        val statusText = prefs.getString(KEY_SYNC_STATUS_TEXT, "Synced from IIMBG LMS") ?: "Synced from IIMBG LMS"
+        val statusText = prefs.getString(KEY_SYNC_STATUS_TEXT, "MBA 2026-28 • Term II") ?: "MBA 2026-28 • Term II"
 
         if (!jsonString.isNullOrBlank()) {
             try {
@@ -531,24 +543,25 @@ class AttendanceRepository(private val context: Context) {
                                 attendedClasses = obj.optInt("attended"),
                                 totalConductedClasses = obj.optInt("conducted"),
                                 totalTermSessions = obj.optInt("totalSessions", 20),
-                                isLmsSynced = true
+                                isLmsSynced = false
                             )
                         )
                     }
                 }
 
                 val officialCourses = getOfficialTermCourses()
-                val hasObsoleteData = courses.any {
-                    (it.courseName.contains("Sustainable") && it.totalConductedClasses > 0) ||
-                    (it.courseName.contains("Management Accounting") && it.totalConductedClasses == 14) ||
-                    (it.courseName.contains("Marketing") && it.attendedClasses == 13) ||
-                    (it.courseName.contains("Information Technology") && it.totalConductedClasses == 9) ||
-                    (it.courseName.contains("Microeconomics") && it.totalConductedClasses == 15) ||
-                    (it.courseName.contains("Organizational Behaviour") && it.totalConductedClasses == 15) ||
-                    (it.courseName.contains("Statistics") && it.totalConductedClasses == 14)
+                val hasOldTerm1Data = courses.any {
+                    it.courseName.contains("Microeconomics") ||
+                    it.courseName.contains("Sustainable") ||
+                    it.courseName.contains("Information Technology") ||
+                    it.courseName.contains("Written Analysis") ||
+                    it.courseName.contains("Statistics") ||
+                    it.courseName.contains("Marketing Management I") ||
+                    it.courseName.contains("Management Accounting I") ||
+                    it.courseName.contains("Organizational Behaviour I")
                 }
 
-                val finalCourses = if (hasObsoleteData) {
+                val finalCourses = if (hasOldTerm1Data || courses.isEmpty()) {
                     officialCourses
                 } else {
                     val mergedCourses = courses.toMutableList()
@@ -584,20 +597,22 @@ class AttendanceRepository(private val context: Context) {
             courses = defaultList,
             lastSyncTimestampMillis = lastSync,
             isLmsConnected = true,
-            syncStatusText = "All 8 Subjects Synced • Auto-refreshed Daily"
+            syncStatusText = "All 10 Subjects Initialized • Term II"
         )
     }
 
     fun getOfficialTermCourses(): List<CourseAttendance> {
         return listOf(
-            CourseAttendance("Information Technology & Systems", "Prof. Raghunathan Krishankumar", attendedClasses = 8, totalConductedClasses = 8, totalTermSessions = 15, isLmsSynced = true),
-            CourseAttendance("Management Accounting I", "Prof. Somya Gupta", attendedClasses = 12, totalConductedClasses = 13, totalTermSessions = 20, isLmsSynced = true),
-            CourseAttendance("Marketing Management I", "Prof. Sumit Saxena", attendedClasses = 12, totalConductedClasses = 14, totalTermSessions = 20, isLmsSynced = true),
-            CourseAttendance("Microeconomics", "Prof. Sharadendu Sharma", attendedClasses = 13, totalConductedClasses = 14, totalTermSessions = 20, isLmsSynced = true),
-            CourseAttendance("Organizational Behaviour I", "Prof. Tarun Kumar Vashisth", attendedClasses = 13, totalConductedClasses = 14, totalTermSessions = 20, isLmsSynced = true),
-            CourseAttendance("Statistics for Management", "Prof. C V Sunil Kumar", attendedClasses = 11, totalConductedClasses = 13, totalTermSessions = 20, isLmsSynced = true),
-            CourseAttendance("Sustainable Development", "Prof. Utkarsh Kamal", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = true),
-            CourseAttendance("Written Analysis and Communication", "Prof. Urjani Chakravarty", attendedClasses = 5, totalConductedClasses = 5, totalTermSessions = 10, isLmsSynced = true)
+            CourseAttendance("Marketing Management II", "Prof. Chandan Parsad", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
+            CourseAttendance("Workshops on Interviews and Presentations", "Prof. Anamita Guha", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 7, isLmsSynced = false),
+            CourseAttendance("Macroeconomics", "Prof. Gupteswar Patel", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
+            CourseAttendance("Organizational Behaviour II", "Prof. Sudipt Kumar", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Financial Management I", "Prof. Bharati Singh", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 15, isLmsSynced = false),
+            CourseAttendance("Operations Research", "Prof. Rohit Agrawal", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 20, isLmsSynced = false),
+            CourseAttendance("Design Thinking", "Prof. Bishal Dey Sarkar", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Management Accounting II", "Prof. Archana Patro", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Entrepreneurship", "Prof. Sunil Kumar Yadav", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false),
+            CourseAttendance("Human Resource Management", "Prof. Abhyudaya Anand Mishra", attendedClasses = 0, totalConductedClasses = 0, totalTermSessions = 10, isLmsSynced = false)
         )
     }
 
@@ -609,7 +624,7 @@ class AttendanceRepository(private val context: Context) {
         }
         clean = clean.replace(Regex("(?i):\\s*Attendance.*"), "")
         clean = clean.replace(Regex("(?i)Attendance:?\\s*"), "")
-        clean = clean.replace(Regex("(?i)\\bTerm\\s*I\\b"), "").trim()
+        clean = clean.replace(Regex("(?i)\\bTerm\\s*(I|II|1|2)\\b"), "").trim()
         clean = clean.replace(Regex("[\\(\\)\\[\\]]"), "").trim()
         return clean.ifBlank { title.trim() }
     }
@@ -625,37 +640,46 @@ class AttendanceRepository(private val context: Context) {
         val n2 = norm(c2)
         if (n1 == n2 || n1.contains(n2) || n2.contains(n1)) return true
 
+        // MBA Term II Specific Domain Aliases
+        val isMkt1 = c1.contains("marketing") || c1.contains("mm")
+        val isMkt2 = c2.contains("marketing") || c2.contains("mm")
+        if (isMkt1 && isMkt2) return true
+
+        val isWip1 = c1.contains("workshop") || c1.contains("interview") || c1.contains("presentation") || c1.contains("wip")
+        val isWip2 = c2.contains("workshop") || c2.contains("interview") || c2.contains("presentation") || c2.contains("wip")
+        if (isWip1 && isWip2) return true
+
+        val isMacro1 = c1.contains("macro")
+        val isMacro2 = c2.contains("macro")
+        if (isMacro1 && isMacro2) return true
+
         val isOb1 = (c1.contains("behav") || c1.contains("ob"))
         val isOb2 = (c2.contains("behav") || c2.contains("ob"))
         if (isOb1 && isOb2) return true
 
-        val isMkt1 = c1.contains("market") || c1.contains("mm")
-        val isMkt2 = c2.contains("market") || c2.contains("mm")
-        if (isMkt1 && isMkt2) return true
+        val isFm1 = c1.contains("financial") || c1.contains("fm")
+        val isFm2 = c2.contains("financial") || c2.contains("fm")
+        if (isFm1 && isFm2) return true
 
-        val isAcct1 = c1.contains("account") || c1.contains("accounting") || c1.contains("acct") || c1 == "ma" || c1 == "ma i"
-        val isAcct2 = c2.contains("account") || c2.contains("accounting") || c2.contains("acct") || c2 == "ma" || c2 == "ma i"
-        if (isAcct1 && isAcct2) return true
+        val isOr1 = c1.contains("operations") || c1.contains("research") || c1 == "or"
+        val isOr2 = c2.contains("operations") || c2.contains("research") || c2 == "or"
+        if (isOr1 && isOr2) return true
 
-        val isMicro1 = c1.contains("micro")
-        val isMicro2 = c2.contains("micro")
-        if (isMicro1 && isMicro2) return true
+        val isDt1 = c1.contains("design") || c1.contains("thinking") || c1 == "dt"
+        val isDt2 = c2.contains("design") || c2.contains("thinking") || c2 == "dt"
+        if (isDt1 && isDt2) return true
 
-        val isStat1 = c1.contains("stat") || c1.contains("sfm")
-        val isStat2 = c2.contains("stat") || c2.contains("sfm")
-        if (isStat1 && isStat2) return true
+        val isMa1 = c1.contains("accounting") || c1.contains("ma")
+        val isMa2 = c2.contains("accounting") || c2.contains("ma")
+        if (isMa1 && isMa2) return true
 
-        val isSust1 = c1.contains("sustain") || c1.contains("sd")
-        val isSust2 = c2.contains("sustain") || c2.contains("sd")
-        if (isSust1 && isSust2) return true
+        val isEnt1 = c1.contains("entrepreneur") || c1.contains("entre")
+        val isEnt2 = c2.contains("entrepreneur") || c2.contains("entre")
+        if (isEnt1 && isEnt2) return true
 
-        val isIt1 = c1.contains("information") || c1.contains("systems") || c1.contains("it &") || c1 == "it" || c1 == "its"
-        val isIt2 = c2.contains("information") || c2.contains("systems") || c2.contains("it &") || c2 == "it" || c2 == "its"
-        if (isIt1 && isIt2) return true
-
-        val isWac1 = c1.contains("written") || c1.contains("wac") || c1.contains("communicat")
-        val isWac2 = c2.contains("written") || c2.contains("wac") || c2.contains("communicat")
-        if (isWac1 && isWac2) return true
+        val isHrm1 = c1.contains("human resource") || c1.contains("hrm") || c1.contains("hr")
+        val isHrm2 = c2.contains("human resource") || c2.contains("hrm") || c2.contains("hr")
+        if (isHrm1 && isHrm2) return true
 
         return false
     }

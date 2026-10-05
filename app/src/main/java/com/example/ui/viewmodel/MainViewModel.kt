@@ -124,6 +124,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTab(tab: NavigationTab) {
+        if (tab == NavigationTab.SCHEDULE) {
+            _selectedDate.value = LocalDate.now()
+        }
         _currentTab.value = tab
     }
 
@@ -200,7 +203,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val result = scheduleRepo.resetToDefault()
             result.onSuccess {
-                _feedbackMessage.value = "Timetable reset to official Term I schedule"
+                _feedbackMessage.value = "Timetable reset to official Term II schedule"
                 scheduleRemindersForToday()
             }.onFailure {
                 _feedbackMessage.value = "Failed to reset timetable: ${it.message}"
@@ -337,7 +340,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetAttendanceToOfficial() {
         attendanceRepo.resetToOfficialTermCourses()
-        _feedbackMessage.value = "Restored attendance for all 8 subjects"
+        _feedbackMessage.value = "Restored attendance for all 10 subjects (Term II)"
     }
 
     fun updateSingleSubjectAttendance(courseName: String, attended: Int, conducted: Int) {

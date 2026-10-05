@@ -341,7 +341,6 @@ class ScheduleRepository(private val context: Context) {
         private const val TAG = "ScheduleRepository"
         const val DEFAULT_CSV_ASSET = "timetable_data.csv"
         const val DEFAULT_REVISED_CSV_ASSET = "Schedule_MBA12_TERM II (Revised).csv"
-        const val DEFAULT_XLSX_ASSET = "Schedule_MBA12_TERM I.xlsx"
 
         @Volatile
         private var INSTANCE: ScheduleRepository? = null

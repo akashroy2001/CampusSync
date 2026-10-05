@@ -1,15 +1,5 @@
 package com.example.ui.screens
 
-import android.annotation.SuppressLint
-import android.content.Intent
-import android.net.Uri
-import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -23,10 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -35,34 +23,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AssignmentTurnedIn
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -75,24 +55,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.CourseAttendance
-import com.example.data.model.IIMBG_LMS_URL
 import com.example.data.model.MANDATORY_ATTENDANCE_THRESHOLD
 import com.example.data.model.OverallAttendance
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceBorder
-import com.example.ui.theme.DarkSurfaceCard
 import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.DarkTextPrimary
 import com.example.ui.theme.DarkTextSecondary
@@ -104,12 +77,19 @@ private val EmeraldGreen = Color(0xFF10B981)
 private val WarningAmber = Color(0xFFF59E0B)
 private val AlertRed = Color(0xFFEF4444)
 
+/**
+ * Term II Attendance Screen:
+ * - Offline-first Room Database persistent attendance tracker.
+ * - Displays all Term II subjects with individual percentage, safe zone status vs 80% threshold.
+ * - Fast 1-tap manual entry for Present and Absent.
+ * - Completely free of external LMS portal dependency.
+ */
 @Composable
 fun AttendanceScreen(
     attendance: OverallAttendance,
-    isSyncing: Boolean,
-    onTriggerSync: () -> Unit,
-    onLmsDataExtracted: (String, String?) -> Boolean,
+    isSyncing: Boolean = false,
+    onTriggerSync: () -> Unit = {},
+    onLmsDataExtracted: (String, String?) -> Boolean = { _, _ -> false },
     onResetToOfficial: () -> Unit = {},
     onUpdateSubject: (String, Int, Int) -> Unit = { _, _, _ -> },
     onRecordAttendance: (String, Boolean) -> Unit = { _, _ -> },
@@ -118,9 +98,7 @@ fun AttendanceScreen(
     modifier: Modifier = Modifier
 ) {
     val dayProfile = LocalDayProfile.current
-    val context = LocalContext.current
 
-    var showLmsWebView by remember { mutableStateOf(false) }
     var editingCourse by remember { mutableStateOf<CourseAttendance?>(null) }
     var showAddCourseDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -158,99 +136,129 @@ fun AttendanceScreen(
         ) {
             item {
                 Spacer(modifier = Modifier.height(8.dp))
-                // Overall KPI Hero Card with 80% Mandatory Threshold
+                // Overall Term II Hero KPI Card
                 OverallAttendanceHeroCard(
                     attendance = attendance,
-                    isSyncing = isSyncing,
-                    onOpenInAppLms = { showLmsWebView = true },
                     onResetToOfficial = onResetToOfficial
                 )
             }
 
+            // Search Bar & Filter Header
             item {
-                // LMS Live Portal Sync Status & Action Card
-                LmsLiveSyncCard(
-                    attendance = attendance,
-                    isSyncing = isSyncing,
-                    onOpenBrowser = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(IIMBG_LMS_URL))
-                        context.startActivity(intent)
-                    },
-                    onOpenInApp = { showLmsWebView = true },
-                    onRefreshSync = onTriggerSync,
-                    onResetToOfficial = onResetToOfficial
-                )
-            }
-
-            // Search and Add Course Header
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Courses Attendance (${attendance.courses.size})",
-                                color = DarkTextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Search bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("attendance_search_field"),
+                        placeholder = { Text("Search Term II courses or professors...", fontSize = 12.sp, color = DarkTextTertiary) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = DarkTextTertiary,
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
-                                    .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear",
+                                        tint = DarkTextTertiary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = DarkTextPrimary,
+                            unfocusedTextColor = DarkTextPrimary,
+                            focusedBorderColor = dayProfile.primaryAccent,
+                            unfocusedBorderColor = DarkSurfaceBorder,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        ),
+                        singleLine = true
+                    )
+
+                    // Controls row: Course count, Filter chips & Add button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "Safe Zone: ≥ 80%",
-                                    color = dayProfile.primaryAccent,
-                                    fontSize = 10.sp,
+                                    text = "Term II Courses (${attendance.courses.size})",
+                                    color = DarkTextPrimary,
+                                    fontSize = 17.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
+                                        .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Safe: ≥ 80%",
+                                        color = dayProfile.primaryAccent,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
-                        }
-                        Text(
-                            text = "Room DB Persistent • Track progress vs required 80% threshold",
-                            color = DarkTextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Button(
-                            onClick = { showAddCourseDialog = true },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text("+ Course", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(
+                                text = "Tap Present or Absent to log • Persistent in Room DB",
+                                color = DarkTextSecondary,
+                                fontSize = 11.sp
+                            )
                         }
 
-                        if (attendance.courses.size < 8) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = { showAddCourseDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("btn_add_course")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Add", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+
                             Spacer(modifier = Modifier.width(6.dp))
+
                             TextButton(
                                 onClick = onResetToOfficial,
-                                modifier = Modifier.testTag("restore_all_subjects_button")
+                                modifier = Modifier.testTag("restore_all_subjects_button"),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.RestartAlt,
-                                    contentDescription = null,
+                                    contentDescription = "Reset",
                                     tint = dayProfile.primaryAccent,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Restore", color = dayProfile.primaryAccent, fontSize = 11.sp)
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Reset", color = dayProfile.primaryAccent, fontSize = 11.sp)
                             }
                         }
                     }
                 }
             }
 
-            // Filter Chips
+            // Filter Chips Bar
             item {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -291,10 +299,11 @@ fun AttendanceScreen(
                 }
             }
 
+            // List of Term II Course Cards
             items(filteredCourses, key = { it.courseName }) { course ->
-                LmsCourseAttendanceCard(
+                TermIICourseAttendanceCard(
                     course = course,
-                    onSyncOrEdit = { editingCourse = course },
+                    onEdit = { editingCourse = course },
                     onRecordPresent = { onRecordAttendance(course.courseName, true) },
                     onRecordAbsent = { onRecordAttendance(course.courseName, false) }
                 )
@@ -304,15 +313,6 @@ fun AttendanceScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
-    }
-
-    // In-App LMS Web View with JavaScript Extractor Bridge & Multi-Subject Crawler
-    if (showLmsWebView) {
-        InAppLmsSyncDialog(
-            url = IIMBG_LMS_URL,
-            onDataExtracted = onLmsDataExtracted,
-            onDismiss = { showLmsWebView = false }
-        )
     }
 
     // Add Course Dialog
@@ -328,7 +328,7 @@ fun AttendanceScreen(
 
     // Quick review / verify dialog for a single course
     editingCourse?.let { course ->
-        CourseAllTabVerifyDialog(
+        CourseAttendanceEditDialog(
             course = course,
             onDismiss = { editingCourse = null },
             onSave = { att, cond ->
@@ -338,10 +338,6 @@ fun AttendanceScreen(
             onDelete = {
                 onDeleteCourse(course.courseName)
                 editingCourse = null
-            },
-            onOpenInLms = {
-                editingCourse = null
-                showLmsWebView = true
             }
         )
     }
@@ -378,28 +374,29 @@ private fun AttendanceFilterChip(
 @Composable
 private fun OverallAttendanceHeroCard(
     attendance: OverallAttendance,
-    isSyncing: Boolean,
-    onOpenInAppLms: () -> Unit,
     onResetToOfficial: () -> Unit
 ) {
     val dayProfile = LocalDayProfile.current
     val percentage = attendance.overallPercentage
+    val hasConducted = attendance.totalConducted > 0
 
     val statusColor = when {
+        !hasConducted -> DarkTextTertiary
         percentage >= 80f -> EmeraldGreen
         percentage >= 75f -> WarningAmber
         else -> AlertRed
     }
 
     val statusText = when {
-        percentage >= 85f -> "Excellent Attendance (Safe)"
-        percentage >= 80f -> "Safe • Above 80% Mandatory Threshold"
-        percentage >= 75f -> "Warning: Below 80% Threshold"
-        else -> "Critical Shortage Warning (< 80%)"
+        !hasConducted -> "Term II Initialized • Awaiting First Lecture"
+        percentage >= 85f -> "Excellent Attendance (Safe Zone)"
+        percentage >= 80f -> "Safe • Above 80% Mandatory Benchmark"
+        percentage >= 75f -> "Warning: Close to 80% Threshold"
+        else -> "Attendance Shortage (< 80%)"
     }
 
     val animatedProgress by animateFloatAsState(
-        targetValue = (percentage / 100f).coerceIn(0f, 1f),
+        targetValue = if (hasConducted) (percentage / 100f).coerceIn(0f, 1f) else 0f,
         animationSpec = tween(durationMillis = 800),
         label = "hero_attendance_progress"
     )
@@ -422,15 +419,15 @@ private fun OverallAttendanceHeroCard(
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Verified,
-                            contentDescription = null,
-                            tint = EmeraldGreen,
-                            modifier = Modifier.size(14.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(dayProfile.primaryAccent)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "LMS ALL-TAB SYNCED • TERM II",
+                            text = "MBA 2026-28 • TERM II",
                             color = dayProfile.primaryAccent,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -439,41 +436,32 @@ private fun OverallAttendanceHeroCard(
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Aggregated across ${attendance.courses.size} core subjects",
+                        text = "Aggregated across ${attendance.courses.size} Term II courses",
                         color = DarkTextSecondary,
                         fontSize = 12.sp
                     )
                 }
 
-                // Sync status chip
+                // Safe zone badge
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50.dp))
-                        .background(DarkSurfaceElevated)
-                        .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(50.dp))
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .background(if (hasConducted) statusColor.copy(alpha = 0.15f) else DarkSurfaceElevated)
+                        .border(1.dp, if (hasConducted) statusColor.copy(alpha = 0.4f) else DarkSurfaceBorder, RoundedCornerShape(50.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(if (isSyncing) WarningAmber else EmeraldGreen)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isSyncing) "Syncing LMS..." else "Daily Sync Active",
-                            color = DarkTextPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    Text(
+                        text = if (percentage >= 80f) "SAFE ZONE" else "SHORTAGE",
+                        color = if (hasConducted) statusColor else DarkTextTertiary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Percentage and Status Badge
+            // Percentage and Benchmark Section
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -482,16 +470,16 @@ private fun OverallAttendanceHeroCard(
                 Column {
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = String.format(Locale.getDefault(), "%.1f", percentage),
+                            text = if (hasConducted) String.format(Locale.getDefault(), "%.1f", percentage) else "100.0",
                             color = DarkTextPrimary,
-                            fontSize = 44.sp,
+                            fontSize = 42.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            lineHeight = 48.sp
+                            lineHeight = 46.sp
                         )
                         Text(
                             text = "%",
                             color = dayProfile.primaryAccent,
-                            fontSize = 24.sp,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
                         )
@@ -520,7 +508,7 @@ private fun OverallAttendanceHeroCard(
                 // Minimum threshold reference
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "Threshold",
+                        text = "Safe Zone Threshold",
                         color = DarkTextTertiary,
                         fontSize = 11.sp
                     )
@@ -531,7 +519,7 @@ private fun OverallAttendanceHeroCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Mandatory IIMBG Rule",
+                        text = "Mandatory Requirement",
                         color = DarkTextTertiary,
                         fontSize = 10.sp
                     )
@@ -540,18 +528,38 @@ private fun OverallAttendanceHeroCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Progress Bar with 80% benchmark
-            Box(modifier = Modifier.fillMaxWidth()) {
+            // Progress Bar with 80% Benchmark
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(14.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
                 LinearProgressIndicator(
                     progress = { animatedProgress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(5.dp)),
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
                     color = statusColor,
                     trackColor = DarkSurfaceElevated,
                     strokeCap = StrokeCap.Round
                 )
+
+                // 80% Target Line Marker
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.80f)
+                        .height(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(2.dp)
+                            .height(14.dp)
+                            .background(dayProfile.primaryAccent)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -587,36 +595,26 @@ private fun OverallAttendanceHeroCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Smart Attendance Recommendation based on 80% threshold
+            // Contextual Guidance Note
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(statusColor.copy(alpha = 0.10f))
-                    .border(0.5.dp, statusColor.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
-                    .padding(12.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(DarkSurfaceElevated)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (percentage >= 80f) Icons.Default.CheckCircle else Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = statusColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (percentage >= 80f) {
-                            "You can safely miss ${attendance.safeBunksRemaining} upcoming lecture(s) across courses while maintaining ≥ 80%."
-                        } else {
-                            "Must attend the next ${attendance.classesNeededFor80} consecutive class(es) to restore attendance above 80%."
-                        },
-                        color = DarkTextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                Text(
+                    text = if (percentage >= 80f) {
+                        "You can safely miss ${attendance.safeBunksRemaining} upcoming lecture(s) across courses while maintaining ≥ 80%."
+                    } else {
+                        "Must attend next ${attendance.classesNeededFor80} consecutive class(es) to restore attendance above 80%."
+                    },
+                    color = DarkTextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
             }
         }
     }
@@ -631,180 +629,37 @@ private fun KpiPill(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(DarkSurfaceElevated)
-            .border(0.5.dp, DarkSurfaceBorder, RoundedCornerShape(10.dp))
-            .padding(vertical = 8.dp, horizontal = 6.dp),
+            .border(0.5.dp, DarkSurfaceBorder, RoundedCornerShape(12.dp))
+            .padding(vertical = 10.dp, horizontal = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = value,
                 color = color,
-                fontSize = 16.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(1.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = label,
-                color = DarkTextSecondary,
+                color = DarkTextTertiary,
                 fontSize = 10.sp
             )
         }
     }
 }
 
+/**
+ * Course Card for each Term II Subject with its own percentage,
+ * 80% Safe Zone indicators, and manual Present/Absent entry buttons.
+ */
 @Composable
-private fun LmsLiveSyncCard(
-    attendance: OverallAttendance,
-    isSyncing: Boolean,
-    onOpenBrowser: () -> Unit,
-    onOpenInApp: () -> Unit,
-    onRefreshSync: () -> Unit,
-    onResetToOfficial: () -> Unit
-) {
-    val dayProfile = LocalDayProfile.current
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(dayProfile.primaryAccent.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.School,
-                            contentDescription = null,
-                            tint = dayProfile.primaryAccent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "IIM Bodh Gaya Moodle LMS",
-                            color = DarkTextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "lms.iimbg.ac.in • 'All' Tab Multi-Subject Sync",
-                            color = DarkTextSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onRefreshSync,
-                    enabled = !isSyncing,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = dayProfile.primaryAccent,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh from LMS",
-                            tint = dayProfile.primaryAccent
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Sync status line
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Sync,
-                    contentDescription = null,
-                    tint = EmeraldGreen,
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = attendance.syncStatusText,
-                    color = DarkTextSecondary,
-                    fontSize = 11.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onOpenInApp,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("open_lms_sync_portal"),
-                    colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AssignmentTurnedIn,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Sync All Subjects (All Tab)",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onOpenBrowser,
-                    modifier = Modifier.weight(0.7f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DarkTextPrimary),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        tint = DarkTextSecondary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Browser",
-                        fontSize = 12.sp,
-                        color = DarkTextPrimary
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LmsCourseAttendanceCard(
+private fun TermIICourseAttendanceCard(
     course: CourseAttendance,
-    onSyncOrEdit: () -> Unit,
+    onEdit: () -> Unit,
     onRecordPresent: () -> Unit,
     onRecordAbsent: () -> Unit
 ) {
@@ -840,7 +695,7 @@ private fun LmsCourseAttendanceCard(
         border = androidx.compose.foundation.BorderStroke(1.dp, if (isCritical) AlertRed.copy(alpha = 0.4f) else DarkSurfaceBorder)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header: Name, Faculty, and Safe Zone Badge
+            // Header: Subject Name, Faculty Name, and Percentage Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -850,7 +705,7 @@ private fun LmsCourseAttendanceCard(
                     Text(
                         text = course.courseName,
                         color = DarkTextPrimary,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
 
@@ -859,49 +714,47 @@ private fun LmsCourseAttendanceCard(
                         Text(
                             text = course.facultyName,
                             color = DarkTextSecondary,
-                            fontSize = 11.sp
+                            fontSize = 12.sp
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Percentage Badge (80% Safe Zone coded)
+                // Percentage Badge: Each subject prominently shows its own %
                 Column(horizontalAlignment = Alignment.End) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isNotStarted) DarkSurfaceElevated else statusColor.copy(alpha = 0.15f))
                             .border(0.5.dp, if (isNotStarted) DarkSurfaceBorder else statusColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Text(
-                            text = if (isNotStarted) "Not Started" else String.format(Locale.getDefault(), "%.1f%%", percentage),
+                            text = if (isNotStarted) "—" else String.format(Locale.getDefault(), "%.1f%%", percentage),
                             color = if (isNotStarted) DarkTextSecondary else statusColor,
-                            fontSize = 13.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
 
-                    if (!isNotStarted) {
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = if (thresholdDelta >= 0) {
-                                String.format(Locale.getDefault(), "+%.1f%% safe", thresholdDelta)
-                            } else {
-                                String.format(Locale.getDefault(), "%.1f%% deficit", thresholdDelta)
-                            },
-                            color = statusColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = when {
+                            isNotStarted -> "0 Conducted"
+                            thresholdDelta >= 0 -> String.format(Locale.getDefault(), "+%.1f%% safe", thresholdDelta)
+                            else -> String.format(Locale.getDefault(), "%.1f%% deficit", thresholdDelta)
+                        },
+                        color = statusColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Progress Bar with 80% threshold line marker
+            // Progress Bar with 80% Safe Zone target marker
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -949,27 +802,14 @@ private fun LmsCourseAttendanceCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "0%",
-                    color = DarkTextTertiary,
-                    fontSize = 9.sp
-                )
-                Text(
-                    text = "Target: 80% Safe Zone",
-                    color = dayProfile.primaryAccent,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "100%",
-                    color = DarkTextTertiary,
-                    fontSize = 9.sp
-                )
+                Text(text = "0%", color = DarkTextTertiary, fontSize = 9.sp)
+                Text(text = "Target: 80% Safe Zone", color = dayProfile.primaryAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(text = "100%", color = DarkTextTertiary, fontSize = 9.sp)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Attendance details & Safe Bunks / Recovery indicator
+            // Attendance Count & Status Guidance
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -978,7 +818,7 @@ private fun LmsCourseAttendanceCard(
                 val statusMessage = when {
                     isNotStarted -> "No sessions conducted yet"
                     isCritical -> "Deficit: Attend next ${course.classesNeededFor80} class(es) for 80%"
-                    isAtRisk -> "0 safe bunks! Next missed class drops below 80%"
+                    isAtRisk -> "0 bunks left! Next absence drops below 80%"
                     else -> "Safe: ${course.safeBunksRemaining} bunk(s) allowed above 80%"
                 }
 
@@ -995,11 +835,11 @@ private fun LmsCourseAttendanceCard(
                         },
                         contentDescription = null,
                         tint = statusColor,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(5.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "${course.attendedClasses}/${course.totalConductedClasses} • $statusMessage",
+                        text = "${course.attendedClasses}/${course.totalConductedClasses} Attended • $statusMessage",
                         color = if (isCritical || isAtRisk) statusColor else DarkTextSecondary,
                         fontSize = 11.sp,
                         fontWeight = if (isCritical || isAtRisk) FontWeight.SemiBold else FontWeight.Normal
@@ -1007,47 +847,46 @@ private fun LmsCourseAttendanceCard(
                 }
 
                 IconButton(
-                    onClick = onSyncOrEdit,
+                    onClick = onEdit,
                     modifier = Modifier.size(24.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit Attendance",
                         tint = DarkTextTertiary,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Quick Interactive Attendance Actions (Mark Present / Missed)
+            // MANUAL ENTRY: Fast Present and Absent Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
                     onClick = onRecordPresent,
                     modifier = Modifier
                         .weight(1f)
-                        .height(34.dp)
+                        .height(38.dp)
                         .testTag("btn_present_${course.courseName.replace(" ", "_")}"),
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.4f))
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.5f))
                 ) {
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = null,
                         tint = EmeraldGreen,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Present (+1)",
                         color = EmeraldGreen,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1056,42 +895,41 @@ private fun LmsCourseAttendanceCard(
                     onClick = onRecordAbsent,
                     modifier = Modifier
                         .weight(1f)
-                        .height(34.dp)
+                        .height(38.dp)
                         .testTag("btn_absent_${course.courseName.replace(" ", "_")}"),
                     colors = ButtonDefaults.buttonColors(containerColor = AlertRed.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, AlertRed.copy(alpha = 0.4f))
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AlertRed.copy(alpha = 0.5f))
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = null,
                         tint = AlertRed,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Missed (+1)",
+                        text = "Absent (+1)",
                         color = AlertRed,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
             if (!isNotStarted) {
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = String.format(Locale.getDefault(), "If attended next: %.1f%%", nextAttendedPct),
+                        text = String.format(Locale.getDefault(), "If Present next: %.1f%%", nextAttendedPct),
                         color = DarkTextTertiary,
                         fontSize = 10.sp
                     )
                     Text(
-                        text = String.format(Locale.getDefault(), "If missed next: %.1f%%", nextMissedPct),
+                        text = String.format(Locale.getDefault(), "If Absent next: %.1f%%", nextMissedPct),
                         color = DarkTextTertiary,
                         fontSize = 10.sp
                     )
@@ -1102,15 +940,14 @@ private fun LmsCourseAttendanceCard(
 }
 
 /**
- * Dialog allowing user to quickly inspect or verify LMS All-tab session numbers for a subject.
+ * Manual edit dialog to fine-tune attended/conducted counts or remove course.
  */
 @Composable
-private fun CourseAllTabVerifyDialog(
+private fun CourseAttendanceEditDialog(
     course: CourseAttendance,
     onDismiss: () -> Unit,
     onSave: (Int, Int) -> Unit,
-    onDelete: () -> Unit = {},
-    onOpenInLms: () -> Unit
+    onDelete: () -> Unit = {}
 ) {
     val dayProfile = LocalDayProfile.current
     var attendedText by remember { mutableStateOf(course.attendedClasses.toString()) }
@@ -1128,7 +965,7 @@ private fun CourseAllTabVerifyDialog(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Room Database • Session Verification",
+                    text = "Manual Attendance Adjustment",
                     color = dayProfile.primaryAccent,
                     fontSize = 11.sp
                 )
@@ -1137,7 +974,7 @@ private fun CourseAllTabVerifyDialog(
         text = {
             Column {
                 Text(
-                    text = "Update attendance counts in Room database or open LMS 'All' tab:",
+                    text = "Update the exact session numbers for this course:",
                     color = DarkTextSecondary,
                     fontSize = 12.sp
                 )
@@ -1147,7 +984,7 @@ private fun CourseAllTabVerifyDialog(
                 OutlinedTextField(
                     value = attendedText,
                     onValueChange = { attendedText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Classes Attended") },
+                    label = { Text("Attended Classes") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = DarkTextPrimary,
@@ -1163,7 +1000,7 @@ private fun CourseAllTabVerifyDialog(
                 OutlinedTextField(
                     value = conductedText,
                     onValueChange = { conductedText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Total Taken/Conducted Sessions") },
+                    label = { Text("Total Conducted Classes") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = DarkTextPrimary,
@@ -1174,26 +1011,7 @@ private fun CourseAllTabVerifyDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedButton(
-                    onClick = onOpenInLms,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = dayProfile.primaryAccent),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, dayProfile.primaryAccent.copy(alpha = 0.5f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.OpenInBrowser,
-                        contentDescription = null,
-                        tint = dayProfile.primaryAccent,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Open Subject on LMS", fontSize = 12.sp)
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 OutlinedButton(
                     onClick = onDelete,
@@ -1202,7 +1020,9 @@ private fun CourseAllTabVerifyDialog(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AlertRed),
                     border = androidx.compose.foundation.BorderStroke(1.dp, AlertRed.copy(alpha = 0.4f))
                 ) {
-                    Text("Delete Course from Database", fontSize = 12.sp, color = AlertRed)
+                    Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = AlertRed, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Delete Subject", fontSize = 12.sp, color = AlertRed)
                 }
             }
         },
@@ -1227,7 +1047,7 @@ private fun CourseAllTabVerifyDialog(
 }
 
 /**
- * Dialog to add a new course to the Room database.
+ * Dialog to add an extra course/elective to the Room database.
  */
 @Composable
 private fun AddCourseDialog(
@@ -1247,13 +1067,13 @@ private fun AddCourseDialog(
         title = {
             Column {
                 Text(
-                    text = "Add Course to Room DB",
+                    text = "Add Term II Course",
                     color = DarkTextPrimary,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Track attendance vs 80% Safe Zone requirement",
+                    text = "Track attendance with 80% Safe Zone requirement",
                     color = dayProfile.primaryAccent,
                     fontSize = 11.sp
                 )
@@ -1279,7 +1099,7 @@ private fun AddCourseDialog(
                 OutlinedTextField(
                     value = facultyName,
                     onValueChange = { facultyName = it },
-                    label = { Text("Faculty / Professor Name (Optional)") },
+                    label = { Text("Faculty / Professor Name") },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = DarkTextPrimary,
                         unfocusedTextColor = DarkTextPrimary,
@@ -1329,7 +1149,7 @@ private fun AddCourseDialog(
                 OutlinedTextField(
                     value = totalSessionsText,
                     onValueChange = { totalSessionsText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Total Term Sessions (Default: 20)") },
+                    label = { Text("Total Term Sessions") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = DarkTextPrimary,
@@ -1363,580 +1183,4 @@ private fun AddCourseDialog(
             }
         }
     )
-}
-
-/**
- * JavaScript Bridge that receives extracted attendance data from Moodle LMS web pages.
- */
-class LmsMultiSubjectBridge(
-    private val onDataExtracted: (String, String?) -> Boolean,
-    private val onStatusUpdate: (String) -> Unit
-) {
-    @JavascriptInterface
-    fun onAttendanceExtracted(jsonPayload: String, studentName: String?) {
-        onDataExtracted(jsonPayload, studentName)
-    }
-
-    @JavascriptInterface
-    fun onProgress(message: String) {
-        onStatusUpdate(message)
-    }
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun InAppLmsSyncDialog(
-    url: String,
-    onDataExtracted: (String, String?) -> Boolean,
-    onDismiss: () -> Unit
-) {
-    val dayProfile = LocalDayProfile.current
-    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
-    var pageTitle by remember { mutableStateOf("IIMBG LMS Portal") }
-    var isLoading by remember { mutableStateOf(true) }
-    var syncNotice by remember { mutableStateOf<String?>(null) }
-    var isScanningAll by remember { mutableStateOf(false) }
-
-    // JavaScript code to automatically remove max points clutter, enforce "All" tab, and parse attendance
-    val crawlerAndExtractorJs = """
-        (function() {
-            // Remove "Maximum possible points" and related irrelevant cards from the page DOM
-            function purgeMaxPossiblePointsClutter() {
-                try {
-                    var elements = document.querySelectorAll('tr, div, li, p, .card, .box, .attwidth');
-                    elements.forEach(function(el) {
-                        var text = (el.innerText || '').toLowerCase();
-                        if ((text.includes('maximum possible points') || text.includes('max possible points') || text.includes('percentage over max')) && !text.includes('percentage over taken')) {
-                            if (el.tagName === 'TR' || el.tagName === 'DIV' || el.tagName === 'LI' || el.classList.contains('card') || el.classList.contains('box')) {
-                                el.style.display = 'none';
-                            }
-                        }
-                    });
-                } catch(e) {}
-            }
-            purgeMaxPossiblePointsClutter();
-            setInterval(purgeMaxPossiblePointsClutter, 1500);
-
-            // Force the 'All' tab (view=5) if currently viewing single attendance activity
-            if (window.location.href.includes('/mod/attendance/view.php') && !window.location.href.includes('view=5')) {
-                var separator = window.location.href.includes('?') ? '&' : '?';
-                window.location.href = window.location.href + separator + 'view=5';
-                return;
-            }
-
-            // Function to parse the Multi-Course Overview Table (as seen in LMS attendance overview)
-            window.parseOverviewTable = function(doc) {
-                var rows = doc.querySelectorAll('table tr');
-                var foundCourses = [];
-                rows.forEach(function(tr) {
-                    var cells = tr.querySelectorAll('th, td');
-                    if (cells.length >= 2) {
-                        var cName = cells[0].innerText.trim();
-                        var cPerc = cells[1].innerText.trim();
-                        if (!cName || /course/i.test(cName) || /average/i.test(cName) || /points/i.test(cName) || /attendance/i.test(cName)) return;
-
-                        var match = cPerc.match(/([\d\.]+)%/);
-                        var isDash = cPerc === '-' || cPerc === '–' || cPerc === '—';
-                        if (match || isDash) {
-                            var perc = match ? parseFloat(match[1]) : 0.0;
-                            var conducted = 0;
-                            var attended = 0;
-                            var lower = cName.toLowerCase();
-
-                            // Exact official Term I session mapping
-                            if (lower.includes('behav') || lower.includes('ob')) {
-                                conducted = 14; attended = 13;
-                            } else if (lower.includes('market') || lower.includes('mm')) {
-                                conducted = 14; attended = 12;
-                            } else if (lower.includes('account') || lower.includes('acct') || lower.includes('ma')) {
-                                conducted = 13; attended = 12;
-                            } else if (lower.includes('micro')) {
-                                conducted = 14; attended = 13;
-                            } else if (lower.includes('stat') || lower.includes('sfm')) {
-                                conducted = 13; attended = 11;
-                            } else if (lower.includes('sustain') || lower.includes('sd')) {
-                                conducted = 0; attended = 0;
-                            } else if (lower.includes('information') || lower.includes('system') || lower.includes('it')) {
-                                conducted = 8; attended = 8;
-                            } else if (lower.includes('written') || lower.includes('wac') || lower.includes('communicat')) {
-                                conducted = 5; attended = 5;
-                            } else {
-                                if (isDash) {
-                                    conducted = 0; attended = 0;
-                                } else if (perc > 0) {
-                                    conducted = 14;
-                                    attended = Math.round((perc / 100.0) * conducted);
-                                }
-                            }
-
-                            foundCourses.push({
-                                courseName: cName,
-                                attended: attended,
-                                conducted: conducted,
-                                facultyName: ''
-                            });
-                        }
-                    }
-                });
-                return foundCourses;
-            };
-
-            // Function to parse a given document's All-tab attendance
-            window.parseAllTabDoc = function(doc, fallbackCourseName) {
-                try {
-                    var courseName = fallbackCourseName || '';
-                    var breadcrumbs = doc.querySelectorAll('.breadcrumb-item a, .breadcrumb a');
-                    if (breadcrumbs.length >= 2) {
-                        for (var i = breadcrumbs.length - 1; i >= 0; i--) {
-                            var t = breadcrumbs[i].innerText.trim();
-                            if (t && !t.toLowerCase().includes('attendance') && !t.toLowerCase().includes('home') && !t.toLowerCase().includes('dashboard') && !t.toLowerCase().includes('my courses')) {
-                                courseName = t;
-                                break;
-                            }
-                        }
-                    }
-                    if (!courseName) {
-                        var h = doc.querySelector('.page-header-headings h1, h1.h2');
-                        if (h) courseName = h.innerText.trim();
-                    }
-                    if (!courseName) {
-                        courseName = doc.title.replace(/Attendance/i, '').replace(/[:|-]/g, '').trim();
-                    }
-
-                    var attended = 0;
-                    var conducted = 0;
-                    var percentage = null;
-
-                    // A: Parse Moodle summary table
-                    var tables = doc.querySelectorAll('table.generaltable, table.attwidth, table.attlist');
-                    tables.forEach(function(tbl) {
-                        var rows = tbl.querySelectorAll('tr');
-                        rows.forEach(function(row) {
-                            var rowText = row.innerText.toLowerCase();
-
-                            // Explicitly skip maximum possible points rows
-                            if (rowText.includes('maximum possible') || rowText.includes('max possible') || rowText.includes('percentage over max')) {
-                                return;
-                            }
-
-                            if (rowText.includes('taken session') || rowText.includes('sessions completed') || rowText.includes('session completed')) {
-                                var m = row.innerText.match(/(\d+)/);
-                                if (m) conducted = parseInt(m[1]);
-                            }
-                            if (rowText.includes('points over taken') || rowText.includes('points over taken sessions')) {
-                                var pm = row.innerText.match(/([\d\.]+)\s*[\/|\(]\s*([\d\.]+)/);
-                                if (pm) {
-                                    var earned = parseFloat(pm[1]);
-                                    var maxPts = parseFloat(pm[2]);
-                                    if (maxPts > 0 && conducted > 0) {
-                                        var perSess = maxPts / conducted;
-                                        attended = Math.round(earned / perSess);
-                                    } else if (earned > 0) {
-                                        attended = Math.round(earned);
-                                    }
-                                }
-                            }
-                            if (rowText.includes('percentage over taken') || rowText.includes('percentage over taken sessions')) {
-                                var percM = row.innerText.match(/([\d\.]+)%/);
-                                if (percM) percentage = parseFloat(percM[1]);
-                            }
-                        });
-                    });
-
-                    // B: If summary missing, count individual rows in .attlist (Present, Absent, Late, Excused)
-                    if (conducted === 0 || attended === 0) {
-                        var sessionRows = doc.querySelectorAll('table.attlist tbody tr, table.generaltable tbody tr');
-                        var rowAtt = 0;
-                        var rowCond = 0;
-                        sessionRows.forEach(function(r) {
-                            var t = r.innerText.toLowerCase();
-                            var isTaken = false;
-                            var isPres = false;
-                            if (t.includes('present') || /\b(p)\b/.test(t)) {
-                                isTaken = true;
-                                isPres = true;
-                            } else if (t.includes('absent') || /\b(a)\b/.test(t)) {
-                                isTaken = true;
-                                isPres = false;
-                            } else if (t.includes('late') || /\b(l)\b/.test(t)) {
-                                isTaken = true;
-                                isPres = true;
-                            } else if (t.includes('excused') || /\b(e)\b/.test(t)) {
-                                isTaken = true;
-                                isPres = true;
-                            }
-                            if (isTaken) {
-                                rowCond++;
-                                if (isPres) rowAtt++;
-                            }
-                        });
-                        if (rowCond > 0) {
-                            conducted = rowCond;
-                            attended = rowAtt;
-                        }
-                    }
-
-                    if (percentage !== null && conducted > 0) {
-                        var calcPerc = (attended / conducted) * 100.0;
-                        if (attended === 0 || Math.abs(calcPerc - percentage) > 1.5) {
-                            attended = Math.round((percentage / 100.0) * conducted);
-                        }
-                    }
-
-                    return {
-                        courseName: courseName,
-                        attended: attended,
-                        conducted: conducted,
-                        facultyName: ''
-                    };
-                } catch(e) {
-                    console.error('Error parsing All-tab:', e);
-                    return null;
-                }
-            };
-
-            // Check if current page has multi-course overview table
-            var overviewList = window.parseOverviewTable(document);
-            if (overviewList && overviewList.length >= 2 && window.LmsBridge) {
-                window.LmsBridge.onAttendanceExtracted(JSON.stringify({ courses: overviewList }), '');
-            } else if (window.location.href.includes('/mod/attendance/view.php')) {
-                // Parse current page if on attendance view
-                var currentParsed = window.parseAllTabDoc(document, '');
-                if (currentParsed && currentParsed.conducted >= 0 && window.LmsBridge) {
-                    window.LmsBridge.onAttendanceExtracted(JSON.stringify({ courses: [currentParsed] }), '');
-                }
-            }
-
-            // Multi-Subject Auto Crawler
-            window.crawlAllSubjects = async function() {
-                if (window.LmsBridge) window.LmsBridge.onProgress('Scanning enrolled subjects on LMS...');
-                var courses = [];
-                var links = document.querySelectorAll('a[href*="/course/view.php?id="]');
-                var courseMap = {};
-                links.forEach(function(a) {
-                    var m = a.href.match(/id=(\d+)/);
-                    var txt = a.innerText.trim();
-                    if (m && txt.length > 2 && !txt.toLowerCase().includes('dashboard') && !txt.toLowerCase().includes('home')) {
-                        courseMap[m[1]] = { id: m[1], name: txt, url: a.href };
-                    }
-                });
-
-                // If on /my/ or page had few links, try fetching /my/
-                if (Object.keys(courseMap).length < 2) {
-                    try {
-                        var myResp = await fetch('/my/', { credentials: 'include' });
-                        var myHtml = await myResp.text();
-                        var parser = new DOMParser();
-                        var myDoc = parser.parseFromString(myHtml, 'text/html');
-                        myDoc.querySelectorAll('a[href*="/course/view.php?id="]').forEach(function(a) {
-                            var m = a.href.match(/id=(\d+)/);
-                            var txt = a.innerText.trim();
-                            if (m && txt.length > 2) courseMap[m[1]] = { id: m[1], name: txt, url: a.href };
-                        });
-                    } catch(e) { console.error(e); }
-                }
-
-                var courseList = Object.values(courseMap);
-                if (courseList.length === 0) {
-                    if (window.LmsBridge) window.LmsBridge.onProgress('Please navigate to your LMS Dashboard or Course page.');
-                    return;
-                }
-
-                var results = [];
-                for (var i = 0; i < courseList.length; i++) {
-                    var c = courseList[i];
-                    if (window.LmsBridge) window.LmsBridge.onProgress('Checking (' + (i+1) + '/' + courseList.length + '): ' + c.name);
-                    try {
-                        var cResp = await fetch(c.url, { credentials: 'include' });
-                        var cHtml = await cResp.text();
-                        var cDoc = new DOMParser().parseFromString(cHtml, 'text/html');
-                        var attLink = cDoc.querySelector('a[href*="/mod/attendance/view.php?id="]');
-                        if (attLink) {
-                            var allUrl = attLink.href + (attLink.href.includes('?') ? '&view=5' : '?view=5');
-                            var attResp = await fetch(allUrl, { credentials: 'include' });
-                            var attHtml = await attResp.text();
-                            var attDoc = new DOMParser().parseFromString(attHtml, 'text/html');
-                            var parsed = window.parseAllTabDoc(attDoc, c.name);
-                            if (parsed) {
-                                results.push(parsed);
-                            }
-                        }
-                    } catch(err) {
-                        console.error('Failed crawling', c.name, err);
-                    }
-                }
-
-                if (results.length > 0 && window.LmsBridge) {
-                    window.LmsBridge.onAttendanceExtracted(JSON.stringify({ courses: results }), '');
-                    window.LmsBridge.onProgress('Successfully synced ' + results.length + ' subjects from All tab!');
-                } else if (window.LmsBridge) {
-                    window.LmsBridge.onProgress('Found ' + courseList.length + ' courses. Open each course attendance to sync directly.');
-                }
-            };
-        })();
-    """.trimIndent()
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding(),
-            color = DarkBackground
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top Action & Title Bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DarkSurface)
-                        .border(0.5.dp, DarkSurfaceBorder)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = DarkTextPrimary
-                        )
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = pageTitle,
-                            color = DarkTextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "lms.iimbg.ac.in • Enforcing 'All' Tab",
-                            color = EmeraldGreen,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Scan All Subjects Multi-Crawler Button
-                    Button(
-                        onClick = {
-                            isScanningAll = true
-                            syncNotice = "Scanning all enrolled subjects on LMS..."
-                            webViewInstance?.evaluateJavascript("window.crawlAllSubjects();", null)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.padding(end = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Scan All",
-                            fontSize = 11.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    IconButton(onClick = { webViewInstance?.reload() }) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Reload",
-                            tint = DarkTextSecondary
-                        )
-                    }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = DarkTextSecondary
-                        )
-                    }
-                }
-
-                // Quick Navigation Shortcuts for MBA Term I Subjects
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DarkSurfaceElevated)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val shortcuts = listOf(
-                        "Dashboard" to "https://lms.iimbg.ac.in/my/",
-                        "OB I" to "https://lms.iimbg.ac.in/course/view.php?name=OB",
-                        "Marketing" to "https://lms.iimbg.ac.in/course/view.php?name=Marketing",
-                        "Acct" to "https://lms.iimbg.ac.in/course/view.php?name=Accounting",
-                        "Micro" to "https://lms.iimbg.ac.in/course/view.php?name=Microeconomics",
-                        "Stats" to "https://lms.iimbg.ac.in/course/view.php?name=Statistics",
-                        "SD" to "https://lms.iimbg.ac.in/course/view.php?name=Sustainable",
-                        "ITS" to "https://lms.iimbg.ac.in/course/view.php?name=IT",
-                        "WAC" to "https://lms.iimbg.ac.in/course/view.php?name=WAC"
-                    )
-
-                    items(shortcuts) { (label, navUrl) ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(DarkSurface)
-                                .border(0.5.dp, DarkSurfaceBorder, RoundedCornerShape(6.dp))
-                                .clickable {
-                                    if (label == "Dashboard") {
-                                        webViewInstance?.loadUrl(navUrl)
-                                    } else {
-                                        // Trigger search in DOM or load
-                                        webViewInstance?.evaluateJavascript(
-                                            """
-                                            (function() {
-                                                var links = document.querySelectorAll('a');
-                                                for (var i = 0; i < links.length; i++) {
-                                                    if (links[i].innerText.toLowerCase().includes('${label.lowercase()}')) {
-                                                        links[i].click();
-                                                        return;
-                                                    }
-                                                }
-                                                window.location.href = '$navUrl';
-                                            })();
-                                            """.trimIndent(),
-                                            null
-                                        )
-                                    }
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = label,
-                                color = dayProfile.primaryAccent,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                if (isLoading) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = dayProfile.primaryAccent,
-                        trackColor = DarkSurface
-                    )
-                }
-
-                syncNotice?.let { notice ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(DarkSurfaceElevated)
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = dayProfile.primaryAccent,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = notice,
-                                color = DarkTextPrimary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                // WebView Container
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                setSupportZoom(true)
-                                builtInZoomControls = true
-                                displayZoomControls = false
-                                cacheMode = WebSettings.LOAD_DEFAULT
-                            }
-
-                            val cookieManager = CookieManager.getInstance()
-                            cookieManager.setAcceptCookie(true)
-                            cookieManager.setAcceptThirdPartyCookies(this, true)
-
-                            addJavascriptInterface(
-                                LmsMultiSubjectBridge(
-                                    onDataExtracted = { json, name ->
-                                        val success = onDataExtracted(json, name)
-                                        if (success) {
-                                            post {
-                                                syncNotice = "Attendance data merged and updated from All Tab!"
-                                                isScanningAll = false
-                                            }
-                                        }
-                                        success
-                                    },
-                                    onStatusUpdate = { msg ->
-                                        post {
-                                            syncNotice = msg
-                                        }
-                                    }
-                                ),
-                                "LmsBridge"
-                            )
-
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onReceivedTitle(view: WebView?, title: String?) {
-                                    if (!title.isNullOrBlank()) {
-                                        pageTitle = title
-                                    }
-                                }
-                            }
-
-                            webViewClient = object : WebViewClient() {
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                    isLoading = true
-                                }
-
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    isLoading = false
-
-                                    // Automatic "All" tab redirect enforcement:
-                                    // In Moodle, if viewing mod/attendance/view.php without view=5, redirect to &view=5!
-                                    if (url != null && url.contains("/mod/attendance/view.php") && !url.contains("view=5")) {
-                                        val targetUrl = url + (if (url.contains("?")) "&view=5" else "?view=5")
-                                        view?.loadUrl(targetUrl)
-                                        return
-                                    }
-
-                                    // Inject crawler and extractor
-                                    evaluateJavascript(crawlerAndExtractorJs, null)
-                                }
-                            }
-
-                            loadUrl(url)
-                            webViewInstance = this
-                        }
-                    }
-                )
-            }
-        }
-    }
 }

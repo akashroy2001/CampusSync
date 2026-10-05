@@ -741,7 +741,7 @@ fun NowDashboardScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Quick Link Card: Term I Overview
+        // Quick Link Card: Term II Overview
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -775,7 +775,7 @@ fun NowDashboardScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "MBA Term I Schedule",
+                            text = "MBA Term II Schedule",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = DarkTextPrimary

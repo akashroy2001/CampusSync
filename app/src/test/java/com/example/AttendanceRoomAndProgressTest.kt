@@ -46,8 +46,8 @@ class AttendanceRoomAndProgressTest {
     fun testAttendanceProgressCalculations_safeZoneAbove80() {
         // 12 attended out of 14 conducted = 85.71%
         val course = CourseAttendanceProgress(
-            courseName = "Marketing Management I",
-            facultyName = "Prof. Sumit Saxena",
+            courseName = "Marketing Management II",
+            facultyName = "Prof. Chandan Parsad",
             attendedClasses = 12,
             totalConductedClasses = 14,
             totalTermSessions = 20
@@ -65,8 +65,8 @@ class AttendanceRoomAndProgressTest {
     fun testAttendanceProgressCalculations_deficitBelow80() {
         // 11 attended out of 15 conducted = 73.33%
         val course = CourseAttendanceProgress(
-            courseName = "Statistics for Management",
-            facultyName = "Prof. C V Sunil Kumar",
+            courseName = "Operations Research",
+            facultyName = "Prof. Rohit Agrawal",
             attendedClasses = 11,
             totalConductedClasses = 15,
             totalTermSessions = 20
@@ -85,10 +85,11 @@ class AttendanceRoomAndProgressTest {
     fun testAttendanceProgressCalculations_onTheBrinkWarning() {
         // 8 attended out of 10 conducted = exactly 80.0%
         val course = CourseAttendanceProgress(
-            courseName = "Financial Management",
+            courseName = "Organizational Behaviour II",
+            facultyName = "Prof. Sudipt Kumar",
             attendedClasses = 8,
             totalConductedClasses = 10,
-            totalTermSessions = 20
+            totalTermSessions = 10
         )
 
         assertTrue(course.isInSafeZone)
@@ -101,15 +102,15 @@ class AttendanceRoomAndProgressTest {
     @Test
     fun testRoomDatabaseOperations() = runBlocking {
         val course1 = CourseAttendanceEntity(
-            courseName = "Microeconomics",
-            facultyName = "Prof. Sharadendu Sharma",
+            courseName = "Macroeconomics",
+            facultyName = "Prof. Gupteswar Patel",
             attendedClasses = 13,
             totalConductedClasses = 14,
             totalTermSessions = 20
         )
         val course2 = CourseAttendanceEntity(
-            courseName = "Sustainable Development",
-            facultyName = "Prof. Utkarsh Kamal",
+            courseName = "Design Thinking",
+            facultyName = "Prof. Bishal Dey Sarkar",
             attendedClasses = 0,
             totalConductedClasses = 0,
             totalTermSessions = 10
@@ -120,7 +121,7 @@ class AttendanceRoomAndProgressTest {
         val count = dao.getCourseCount()
         assertEquals(2, count)
 
-        val retrieved = dao.getCourseByName("Microeconomics")
+        val retrieved = dao.getCourseByName("Macroeconomics")
         assertEquals(13, retrieved?.attendedClasses)
         assertEquals(14, retrieved?.totalConductedClasses)
 
