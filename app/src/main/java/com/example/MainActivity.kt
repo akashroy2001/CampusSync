@@ -72,7 +72,6 @@ fun CampusSyncApp(viewModel: MainViewModel) {
     val isLoadingSchedule by viewModel.isLoadingSchedule.collectAsState()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
     val attendance by viewModel.attendance.collectAsState()
-    val isAttendanceSyncing by viewModel.isAttendanceSyncing.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val feedbackMessage by viewModel.feedbackMessage.collectAsState()
 
@@ -157,20 +156,12 @@ fun CampusSyncApp(viewModel: MainViewModel) {
                     NavigationTab.ATTENDANCE -> {
                         AttendanceScreen(
                             attendance = attendance,
-                            isSyncing = isAttendanceSyncing,
-                            onTriggerSync = { viewModel.syncAttendanceWithLms() },
-                            onLmsDataExtracted = { json, studentName ->
-                                viewModel.processLmsAttendancePayload(json, studentName)
+                            onSetAttendedCount = { courseName, attended ->
+                                viewModel.setSubjectAttendedCount(courseName, attended)
                             },
                             onResetToOfficial = { viewModel.resetAttendanceToOfficial() },
                             onUpdateSubject = { courseName, att, cond ->
                                 viewModel.updateSingleSubjectAttendance(courseName, att, cond)
-                            },
-                            onRecordAttendance = { courseName, attended ->
-                                viewModel.recordAttendance(courseName, attended)
-                            },
-                            onAddNewCourse = { name, fac, att, cond, sess ->
-                                viewModel.addNewCourse(name, fac, att, cond, sess)
                             },
                             onDeleteCourse = { courseName ->
                                 viewModel.deleteCourse(courseName)

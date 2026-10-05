@@ -24,11 +24,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
@@ -79,41 +82,35 @@ private val AlertRed = Color(0xFFEF4444)
 
 /**
  * Term II Attendance Screen:
- * - Offline-first Room Database persistent attendance tracker.
- * - Displays all Term II subjects with individual percentage, safe zone status vs 80% threshold.
- * - Fast 1-tap manual entry for Present and Absent.
- * - Completely free of external LMS portal dependency.
+ * - Direct, clean subject attendance tracker.
+ * - Synced with timetable schedule for conducted class counts.
+ * - 1-tap options matching the conducted classes (e.g. 2/2 Present, 1/2 Present, 0/2 Present).
+ * - Individual safe zone status per subject (80% benchmark).
+ * - No aggregated summary section or external portal dependencies.
  */
 @Composable
 fun AttendanceScreen(
     attendance: OverallAttendance,
-    isSyncing: Boolean = false,
-    onTriggerSync: () -> Unit = {},
-    onLmsDataExtracted: (String, String?) -> Boolean = { _, _ -> false },
+    onSetAttendedCount: (String, Int) -> Unit = { _, _ -> },
     onResetToOfficial: () -> Unit = {},
     onUpdateSubject: (String, Int, Int) -> Unit = { _, _, _ -> },
-    onRecordAttendance: (String, Boolean) -> Unit = { _, _ -> },
-    onAddNewCourse: (String, String, Int, Int, Int) -> Unit = { _, _, _, _, _ -> },
     onDeleteCourse: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val dayProfile = LocalDayProfile.current
 
     var editingCourse by remember { mutableStateOf<CourseAttendance?>(null) }
-    var showAddCourseDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, SAFE, AT_RISK, CRITICAL
+    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, SAFE, SHORTAGE
 
-    val safeCount = attendance.courses.count { it.totalConductedClasses > 0 && it.percentage >= 80f && it.safeBunksRemaining > 0 }
-    val warningCount = attendance.courses.count { it.totalConductedClasses > 0 && it.percentage >= 80f && it.safeBunksRemaining == 0 }
-    val criticalCount = attendance.courses.count { it.totalConductedClasses > 0 && it.percentage < 80f }
+    val safeCount = attendance.courses.count { it.totalConductedClasses > 0 && it.percentage >= MANDATORY_ATTENDANCE_THRESHOLD }
+    val shortageCount = attendance.courses.count { it.totalConductedClasses > 0 && it.percentage < MANDATORY_ATTENDANCE_THRESHOLD }
 
     val filteredCourses = remember(attendance.courses, searchQuery, selectedFilter) {
         attendance.courses.filter { course ->
             val matchesFilter = when (selectedFilter) {
-                "SAFE" -> course.totalConductedClasses > 0 && course.percentage >= 80f && course.safeBunksRemaining > 0
-                "AT_RISK" -> course.totalConductedClasses > 0 && course.percentage >= 80f && course.safeBunksRemaining == 0
-                "CRITICAL" -> course.totalConductedClasses > 0 && course.percentage < 80f
+                "SAFE" -> course.totalConductedClasses > 0 && course.percentage >= MANDATORY_ATTENDANCE_THRESHOLD
+                "SHORTAGE" -> course.totalConductedClasses > 0 && course.percentage < MANDATORY_ATTENDANCE_THRESHOLD
                 else -> true
             }
             val matchesQuery = searchQuery.isBlank() ||
@@ -132,130 +129,105 @@ fun AttendanceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
-                Spacer(modifier = Modifier.height(8.dp))
-                // Overall Term II Hero KPI Card
-                OverallAttendanceHeroCard(
-                    attendance = attendance,
-                    onResetToOfficial = onResetToOfficial
-                )
-            }
+                Spacer(modifier = Modifier.height(10.dp))
 
-            // Search Bar & Filter Header
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // Search bar
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("attendance_search_field"),
-                        placeholder = { Text("Search Term II courses or professors...", fontSize = 12.sp, color = DarkTextTertiary) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = DarkTextTertiary,
-                                modifier = Modifier.size(18.dp)
+                // Clean Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Term II Attendance",
+                                color = DarkTextPrimary,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold
                             )
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear",
-                                        tint = DarkTextTertiary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = DarkTextPrimary,
-                            unfocusedTextColor = DarkTextPrimary,
-                            focusedBorderColor = dayProfile.primaryAccent,
-                            unfocusedBorderColor = DarkSurfaceBorder,
-                            focusedContainerColor = DarkSurface,
-                            unfocusedContainerColor = DarkSurface
-                        ),
-                        singleLine = true
-                    )
-
-                    // Controls row: Course count, Filter chips & Add button
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
+                                    .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
                                 Text(
-                                    text = "Term II Courses (${attendance.courses.size})",
-                                    color = DarkTextPrimary,
-                                    fontSize = 17.sp,
+                                    text = "Safe: ≥ 80%",
+                                    color = dayProfile.primaryAccent,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(dayProfile.primaryAccent.copy(alpha = 0.15f))
-                                        .border(0.5.dp, dayProfile.primaryAccent.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Safe: ≥ 80%",
-                                        color = dayProfile.primaryAccent,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Tap Present or Absent to log • Persistent in Room DB",
-                                color = DarkTextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = { showAddCourseDialog = true },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                modifier = Modifier.testTag("btn_add_course")
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            }
-
-                            Spacer(modifier = Modifier.width(6.dp))
-
-                            TextButton(
-                                onClick = onResetToOfficial,
-                                modifier = Modifier.testTag("restore_all_subjects_button"),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.RestartAlt,
-                                    contentDescription = "Reset",
-                                    tint = dayProfile.primaryAccent,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Reset", color = dayProfile.primaryAccent, fontSize = 11.sp)
                             }
                         }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Synced with schedule • Tap attendance option per course",
+                            color = DarkTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onResetToOfficial,
+                        modifier = Modifier.testTag("restore_all_subjects_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RestartAlt,
+                            contentDescription = "Reset Attendance to Schedule",
+                            tint = dayProfile.primaryAccent
+                        )
                     }
                 }
+            }
+
+            // Search Bar
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("attendance_search_field"),
+                    placeholder = {
+                        Text("Search Term II courses or professors...", fontSize = 13.sp, color = DarkTextTertiary)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = DarkTextTertiary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = DarkTextTertiary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = DarkTextPrimary,
+                        unfocusedTextColor = DarkTextPrimary,
+                        focusedBorderColor = dayProfile.primaryAccent,
+                        unfocusedBorderColor = DarkSurfaceBorder,
+                        focusedContainerColor = DarkSurface,
+                        unfocusedContainerColor = DarkSurface
+                    ),
+                    singleLine = true
+                )
             }
 
             // Filter Chips Bar
@@ -282,51 +254,33 @@ fun AttendanceScreen(
                     }
                     item {
                         AttendanceFilterChip(
-                            label = "At Risk ($warningCount)",
-                            isSelected = selectedFilter == "AT_RISK",
-                            color = WarningAmber,
-                            onClick = { selectedFilter = "AT_RISK" }
-                        )
-                    }
-                    item {
-                        AttendanceFilterChip(
-                            label = "Shortage ($criticalCount)",
-                            isSelected = selectedFilter == "CRITICAL",
+                            label = "Shortage ($shortageCount)",
+                            isSelected = selectedFilter == "SHORTAGE",
                             color = AlertRed,
-                            onClick = { selectedFilter = "CRITICAL" }
+                            onClick = { selectedFilter = "SHORTAGE" }
                         )
                     }
                 }
             }
 
-            // List of Term II Course Cards
+            // Clean list of Subject Cards
             items(filteredCourses, key = { it.courseName }) { course ->
-                TermIICourseAttendanceCard(
+                TermIICourseCard(
                     course = course,
-                    onEdit = { editingCourse = course },
-                    onRecordPresent = { onRecordAttendance(course.courseName, true) },
-                    onRecordAbsent = { onRecordAttendance(course.courseName, false) }
+                    onSelectAttended = { attended ->
+                        onSetAttendedCount(course.courseName, attended)
+                    },
+                    onEdit = { editingCourse = course }
                 )
             }
 
             item {
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(28.dp))
             }
         }
     }
 
-    // Add Course Dialog
-    if (showAddCourseDialog) {
-        AddCourseDialog(
-            onDismiss = { showAddCourseDialog = false },
-            onAdd = { name, fac, att, cond, sess ->
-                onAddNewCourse(name, fac, att, cond, sess)
-                showAddCourseDialog = false
-            }
-        )
-    }
-
-    // Quick review / verify dialog for a single course
+    // Manual edit dialog to fine-tune attended/conducted counts or remove course
     editingCourse?.let { course ->
         CourseAttendanceEditDialog(
             course = course,
@@ -360,7 +314,7 @@ private fun AttendanceFilterChip(
                 RoundedCornerShape(20.dp)
             )
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 14.dp, vertical = 7.dp)
     ) {
         Text(
             text = label,
@@ -371,320 +325,38 @@ private fun AttendanceFilterChip(
     }
 }
 
+/**
+ * Clean, spacious, uncluttered card for each Term II Course.
+ * Shows:
+ * 1. Course title & professor
+ * 2. Individual % and SAFE ZONE / SHORTAGE indicator
+ * 3. Schedule context: classes done so far
+ * 4. Manual options synced to conducted count (e.g. 2/2 Present, 1/2 Present, 0/2 Present)
+ */
 @Composable
-private fun OverallAttendanceHeroCard(
-    attendance: OverallAttendance,
-    onResetToOfficial: () -> Unit
+private fun TermIICourseCard(
+    course: CourseAttendance,
+    onSelectAttended: (Int) -> Unit,
+    onEdit: () -> Unit
 ) {
     val dayProfile = LocalDayProfile.current
-    val percentage = attendance.overallPercentage
-    val hasConducted = attendance.totalConducted > 0
+    val conducted = course.totalConductedClasses
+    val attended = course.attendedClasses
+    val percentage = course.percentage
+    val isNotStarted = course.isNotStarted
 
+    val isSafe = !isNotStarted && percentage >= MANDATORY_ATTENDANCE_THRESHOLD
     val statusColor = when {
-        !hasConducted -> DarkTextTertiary
-        percentage >= 80f -> EmeraldGreen
-        percentage >= 75f -> WarningAmber
+        isNotStarted -> DarkTextTertiary
+        isSafe -> EmeraldGreen
         else -> AlertRed
     }
 
-    val statusText = when {
-        !hasConducted -> "Term II Initialized • Awaiting First Lecture"
-        percentage >= 85f -> "Excellent Attendance (Safe Zone)"
-        percentage >= 80f -> "Safe • Above 80% Mandatory Benchmark"
-        percentage >= 75f -> "Warning: Close to 80% Threshold"
-        else -> "Attendance Shortage (< 80%)"
-    }
-
     val animatedProgress by animateFloatAsState(
-        targetValue = if (hasConducted) (percentage / 100f).coerceIn(0f, 1f) else 0f,
-        animationSpec = tween(durationMillis = 800),
-        label = "hero_attendance_progress"
+        targetValue = if (conducted > 0) (percentage / 100f).coerceIn(0f, 1f) else 0f,
+        animationSpec = tween(durationMillis = 400),
+        label = "progress"
     )
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("hero_attendance_card"),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(dayProfile.primaryAccent)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "MBA 2026-28 • TERM II",
-                            color = dayProfile.primaryAccent,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Aggregated across ${attendance.courses.size} Term II courses",
-                        color = DarkTextSecondary,
-                        fontSize = 12.sp
-                    )
-                }
-
-                // Safe zone badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50.dp))
-                        .background(if (hasConducted) statusColor.copy(alpha = 0.15f) else DarkSurfaceElevated)
-                        .border(1.dp, if (hasConducted) statusColor.copy(alpha = 0.4f) else DarkSurfaceBorder, RoundedCornerShape(50.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (percentage >= 80f) "SAFE ZONE" else "SHORTAGE",
-                        color = if (hasConducted) statusColor else DarkTextTertiary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Percentage and Benchmark Section
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = if (hasConducted) String.format(Locale.getDefault(), "%.1f", percentage) else "100.0",
-                            color = DarkTextPrimary,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            lineHeight = 46.sp
-                        )
-                        Text(
-                            text = "%",
-                            color = dayProfile.primaryAccent,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (percentage >= 80f) Icons.Default.CheckCircle else Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = statusColor,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = statusText,
-                            color = statusColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                // Minimum threshold reference
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "Safe Zone Threshold",
-                        color = DarkTextTertiary,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "80.0%",
-                        color = dayProfile.primaryAccent,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Mandatory Requirement",
-                        color = DarkTextTertiary,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Progress Bar with 80% Benchmark
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(14.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                LinearProgressIndicator(
-                    progress = { animatedProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    color = statusColor,
-                    trackColor = DarkSurfaceElevated,
-                    strokeCap = StrokeCap.Round
-                )
-
-                // 80% Target Line Marker
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.80f)
-                        .height(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(2.dp)
-                            .height(14.dp)
-                            .background(dayProfile.primaryAccent)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 4 Stats KPI Pill Grid
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                KpiPill(
-                    label = "Attended",
-                    value = "${attendance.totalAttended}",
-                    color = EmeraldGreen,
-                    modifier = Modifier.weight(1f)
-                )
-                KpiPill(
-                    label = "Conducted",
-                    value = "${attendance.totalConducted}",
-                    color = dayProfile.primaryAccent,
-                    modifier = Modifier.weight(1f)
-                )
-                KpiPill(
-                    label = "Missed",
-                    value = "${attendance.totalMissed}",
-                    color = if (attendance.totalMissed > 0) AlertRed else DarkTextSecondary,
-                    modifier = Modifier.weight(1f)
-                )
-                KpiPill(
-                    label = "Safe Bunks",
-                    value = "${attendance.safeBunksRemaining}",
-                    color = if (attendance.safeBunksRemaining > 0) EmeraldGreen else WarningAmber,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Contextual Guidance Note
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(DarkSurfaceElevated)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = if (percentage >= 80f) {
-                        "You can safely miss ${attendance.safeBunksRemaining} upcoming lecture(s) across courses while maintaining ≥ 80%."
-                    } else {
-                        "Must attend next ${attendance.classesNeededFor80} consecutive class(es) to restore attendance above 80%."
-                    },
-                    color = DarkTextSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun KpiPill(
-    label: String,
-    value: String,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(DarkSurfaceElevated)
-            .border(0.5.dp, DarkSurfaceBorder, RoundedCornerShape(12.dp))
-            .padding(vertical = 10.dp, horizontal = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = value,
-                color = color,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = label,
-                color = DarkTextTertiary,
-                fontSize = 10.sp
-            )
-        }
-    }
-}
-
-/**
- * Course Card for each Term II Subject with its own percentage,
- * 80% Safe Zone indicators, and manual Present/Absent entry buttons.
- */
-@Composable
-private fun TermIICourseAttendanceCard(
-    course: CourseAttendance,
-    onEdit: () -> Unit,
-    onRecordPresent: () -> Unit,
-    onRecordAbsent: () -> Unit
-) {
-    val dayProfile = LocalDayProfile.current
-    val percentage = course.percentage
-    val isNotStarted = course.isNotStarted
-    val thresholdDelta = percentage - MANDATORY_ATTENDANCE_THRESHOLD
-
-    val isSafe = percentage >= MANDATORY_ATTENDANCE_THRESHOLD && !isNotStarted
-    val isAtRisk = isSafe && course.safeBunksRemaining == 0
-    val isCritical = !isNotStarted && percentage < MANDATORY_ATTENDANCE_THRESHOLD
-
-    val statusColor = when {
-        isNotStarted -> DarkTextTertiary
-        isCritical -> AlertRed
-        isAtRisk -> WarningAmber
-        else -> EmeraldGreen
-    }
-
-    val nextAttendedPct = if (course.totalConductedClasses > 0) {
-        ((course.attendedClasses + 1).toFloat() / (course.totalConductedClasses + 1)) * 100f
-    } else 100f
-    val nextMissedPct = if (course.totalConductedClasses > 0) {
-        (course.attendedClasses.toFloat() / (course.totalConductedClasses + 1)) * 100f
-    } else 0f
 
     Card(
         modifier = Modifier
@@ -692,10 +364,17 @@ private fun TermIICourseAttendanceCard(
             .testTag("course_card_${course.courseName.replace(" ", "_")}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (isCritical) AlertRed.copy(alpha = 0.4f) else DarkSurfaceBorder)
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (!isNotStarted && !isSafe) AlertRed.copy(alpha = 0.35f) else DarkSurfaceBorder
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header: Subject Name, Faculty Name, and Percentage Badge
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Header Row: Subject Name, Faculty Name, and Percentage Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -706,233 +385,348 @@ private fun TermIICourseAttendanceCard(
                         text = course.courseName,
                         color = DarkTextPrimary,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 21.sp
                     )
 
                     if (course.facultyName.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = course.facultyName,
                             color = DarkTextSecondary,
                             fontSize = 12.sp
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.EventNote,
+                            contentDescription = null,
+                            tint = DarkTextTertiary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = when {
+                                conducted == 0 -> "No classes held yet in schedule"
+                                conducted == 1 -> "1 class done so far"
+                                else -> "$conducted classes done so far"
+                            },
+                            color = DarkTextTertiary,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                // Percentage Badge: Each subject prominently shows its own %
+                // Percentage & Zone Badge
                 Column(horizontalAlignment = Alignment.End) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(if (isNotStarted) DarkSurfaceElevated else statusColor.copy(alpha = 0.15f))
-                            .border(0.5.dp, if (isNotStarted) DarkSurfaceBorder else statusColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .border(
+                                1.dp,
+                                if (isNotStarted) DarkSurfaceBorder else statusColor.copy(alpha = 0.4f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = if (isNotStarted) "—" else String.format(Locale.getDefault(), "%.1f%%", percentage),
                             color = if (isNotStarted) DarkTextSecondary else statusColor,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(3.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = when {
-                            isNotStarted -> "0 Conducted"
-                            thresholdDelta >= 0 -> String.format(Locale.getDefault(), "+%.1f%% safe", thresholdDelta)
-                            else -> String.format(Locale.getDefault(), "%.1f%% deficit", thresholdDelta)
+                            isNotStarted -> "Pending"
+                            isSafe -> "SAFE ZONE"
+                            else -> "SHORTAGE"
                         },
                         color = statusColor,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // Progress Bar (when classes have been conducted)
+            if (conducted > 0) {
+                Spacer(modifier = Modifier.height(14.dp))
 
-            // Progress Bar with 80% Safe Zone target marker
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(14.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                if (!isNotStarted) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
                     LinearProgressIndicator(
-                        progress = { (percentage / 100f).coerceIn(0f, 1f) },
+                        progress = { animatedProgress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp)),
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
                         color = statusColor,
                         trackColor = DarkSurfaceElevated,
                         strokeCap = StrokeCap.Round
                     )
-                } else {
+
+                    // 80% Benchmark Line Marker
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(DarkSurfaceBorder.copy(alpha = 0.4f))
-                    )
+                            .fillMaxWidth(0.80f)
+                            .height(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .width(2.dp)
+                                .height(12.dp)
+                                .background(dayProfile.primaryAccent)
+                        )
+                    }
                 }
 
-                // 80% Target Line Marker
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.80f)
-                        .height(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(2.dp)
-                            .height(14.dp)
-                            .background(dayProfile.primaryAccent)
-                    )
-                }
-            }
+                Spacer(modifier = Modifier.height(6.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(text = "0%", color = DarkTextTertiary, fontSize = 9.sp)
-                Text(text = "Target: 80% Safe Zone", color = dayProfile.primaryAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Text(text = "100%", color = DarkTextTertiary, fontSize = 9.sp)
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Attendance Count & Status Guidance
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val statusMessage = when {
-                    isNotStarted -> "No sessions conducted yet"
-                    isCritical -> "Deficit: Attend next ${course.classesNeededFor80} class(es) for 80%"
-                    isAtRisk -> "0 bunks left! Next absence drops below 80%"
-                    else -> "Safe: ${course.safeBunksRemaining} bunk(s) allowed above 80%"
-                }
-
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = when {
-                            isNotStarted -> Icons.Default.Info
-                            isCritical -> Icons.Default.Warning
-                            isAtRisk -> Icons.Default.Warning
-                            else -> Icons.Default.CheckCircle
-                        },
-                        contentDescription = null,
-                        tint = statusColor,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${course.attendedClasses}/${course.totalConductedClasses} Attended • $statusMessage",
-                        color = if (isCritical || isAtRisk) statusColor else DarkTextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = if (isCritical || isAtRisk) FontWeight.SemiBold else FontWeight.Normal
-                    )
-                }
-
-                IconButton(
-                    onClick = onEdit,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Edit Attendance",
-                        tint = DarkTextTertiary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // MANUAL ENTRY: Fast Present and Absent Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = onRecordPresent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .testTag("btn_present_${course.courseName.replace(" ", "_")}"),
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(10.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.5f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = EmeraldGreen,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Present (+1)",
-                        color = EmeraldGreen,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Button(
-                    onClick = onRecordAbsent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .testTag("btn_absent_${course.courseName.replace(" ", "_")}"),
-                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(10.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, AlertRed.copy(alpha = 0.5f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = null,
-                        tint = AlertRed,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Absent (+1)",
-                        color = AlertRed,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            if (!isNotStarted) {
-                Spacer(modifier = Modifier.height(8.dp))
+                // Contextual Insight Line
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isSafe) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = statusColor,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = if (isSafe) {
+                                if (course.safeBunksRemaining > 0) {
+                                    "Safe: Can miss ${course.safeBunksRemaining} upcoming lecture(s) above 80%"
+                                } else {
+                                    "On the brink: 0 bunks left to stay above 80%"
+                                }
+                            } else {
+                                "Shortage: Attend next ${course.classesNeededFor80} class(es) to reach 80%"
+                            },
+                            color = statusColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Attendance",
+                            tint = DarkTextTertiary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // MANUAL ATTENDANCE SELECTION
+            // Synced to the current day and all previous classes of that subject
+            Text(
+                text = "Attendance Selection:",
+                color = DarkTextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (conducted == 0) {
+                // When 0 classes conducted so far
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DarkSurfaceElevated)
+                        .padding(horizontal = 12.dp, vertical = 9.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = DarkTextTertiary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "No classes conducted yet • Attendance options unlock once first lecture begins",
+                            color = DarkTextTertiary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            } else if (conducted in 1..4) {
+                // Show clean options for each possible attendance count
+                // e.g. for conducted == 2: "2/2 Present (100%)", "1/2 Present (50%)", "0/2 Present (0%)"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    for (count in conducted downTo 0) {
+                        val isSelected = attended == count
+                        val optionPct = (count.toFloat() / conducted.toFloat()) * 100f
+                        val optionSafe = optionPct >= MANDATORY_ATTENDANCE_THRESHOLD
+                        val optionColor = if (optionSafe) EmeraldGreen else AlertRed
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isSelected) optionColor.copy(alpha = 0.18f) else DarkSurfaceElevated
+                                )
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) optionColor else DarkSurfaceBorder,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { onSelectAttended(count) }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = optionColor,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                    }
+                                    Text(
+                                        text = "$count/$conducted Present",
+                                        color = if (isSelected) DarkTextPrimary else DarkTextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = String.format(Locale.getDefault(), "%.0f%%", optionPct),
+                                    color = if (isSelected) optionColor else DarkTextTertiary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // When conducted >= 5: Clean Stepper + Quick Presets
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = String.format(Locale.getDefault(), "If Present next: %.1f%%", nextAttendedPct),
-                        color = DarkTextTertiary,
-                        fontSize = 10.sp
+                        text = "$attended / $conducted Present (${String.format(Locale.getDefault(), "%.0f%%", percentage)})",
+                        color = statusColor,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = String.format(Locale.getDefault(), "If Absent next: %.1f%%", nextMissedPct),
-                        color = DarkTextTertiary,
-                        fontSize = 10.sp
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        IconButton(
+                            onClick = { if (attended > 0) onSelectAttended(attended - 1) },
+                            enabled = attended > 0,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, DarkSurfaceBorder, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Remove,
+                                contentDescription = "Decrease",
+                                tint = if (attended > 0) DarkTextPrimary else DarkTextTertiary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { if (attended < conducted) onSelectAttended(attended + 1) },
+                            enabled = attended < conducted,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, DarkSurfaceBorder, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Increase",
+                                tint = if (attended < conducted) dayProfile.primaryAccent else DarkTextTertiary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Presets
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val presets = listOf(
+                        conducted to "All Present",
+                        (conducted - 1).coerceAtLeast(0) to "Missed 1",
+                        (conducted - 2).coerceAtLeast(0) to "Missed 2"
                     )
+
+                    presets.forEach { (cnt, label) ->
+                        val isSelected = attended == cnt
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) dayProfile.primaryAccent.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                .border(1.dp, if (isSelected) dayProfile.primaryAccent else DarkSurfaceBorder, RoundedCornerShape(8.dp))
+                                .clickable { onSelectAttended(cnt) }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "$label ($cnt/$conducted)",
+                                color = if (isSelected) dayProfile.primaryAccent else DarkTextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -967,7 +761,7 @@ private fun CourseAttendanceEditDialog(
                 Text(
                     text = "Manual Attendance Adjustment",
                     color = dayProfile.primaryAccent,
-                    fontSize = 11.sp
+                    fontSize = 12.sp
                 )
             }
         },
@@ -1036,145 +830,6 @@ private fun CourseAttendanceEditDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent)
             ) {
                 Text("Save", color = Color.White)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = DarkTextSecondary)
-            }
-        }
-    )
-}
-
-/**
- * Dialog to add an extra course/elective to the Room database.
- */
-@Composable
-private fun AddCourseDialog(
-    onDismiss: () -> Unit,
-    onAdd: (name: String, faculty: String, attended: Int, conducted: Int, totalSessions: Int) -> Unit
-) {
-    val dayProfile = LocalDayProfile.current
-    var courseName by remember { mutableStateOf("") }
-    var facultyName by remember { mutableStateOf("") }
-    var attendedText by remember { mutableStateOf("0") }
-    var conductedText by remember { mutableStateOf("0") }
-    var totalSessionsText by remember { mutableStateOf("20") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = DarkSurface,
-        title = {
-            Column {
-                Text(
-                    text = "Add Term II Course",
-                    color = DarkTextPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Track attendance with 80% Safe Zone requirement",
-                    color = dayProfile.primaryAccent,
-                    fontSize = 11.sp
-                )
-            }
-        },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = courseName,
-                    onValueChange = { courseName = it },
-                    label = { Text("Course Name *") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = DarkTextPrimary,
-                        unfocusedTextColor = DarkTextPrimary,
-                        focusedBorderColor = dayProfile.primaryAccent,
-                        unfocusedBorderColor = DarkSurfaceBorder
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = facultyName,
-                    onValueChange = { facultyName = it },
-                    label = { Text("Faculty / Professor Name") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = DarkTextPrimary,
-                        unfocusedTextColor = DarkTextPrimary,
-                        focusedBorderColor = dayProfile.primaryAccent,
-                        unfocusedBorderColor = DarkSurfaceBorder
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = attendedText,
-                        onValueChange = { attendedText = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Attended") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = DarkTextPrimary,
-                            unfocusedTextColor = DarkTextPrimary,
-                            focusedBorderColor = dayProfile.primaryAccent,
-                            unfocusedBorderColor = DarkSurfaceBorder
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    OutlinedTextField(
-                        value = conductedText,
-                        onValueChange = { conductedText = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Conducted") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = DarkTextPrimary,
-                            unfocusedTextColor = DarkTextPrimary,
-                            focusedBorderColor = dayProfile.primaryAccent,
-                            unfocusedBorderColor = DarkSurfaceBorder
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = totalSessionsText,
-                    onValueChange = { totalSessionsText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Total Term Sessions") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = DarkTextPrimary,
-                        unfocusedTextColor = DarkTextPrimary,
-                        focusedBorderColor = dayProfile.primaryAccent,
-                        unfocusedBorderColor = DarkSurfaceBorder
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (courseName.isNotBlank()) {
-                        val att = attendedText.toIntOrNull() ?: 0
-                        val cond = conductedText.toIntOrNull() ?: 0
-                        val sess = totalSessionsText.toIntOrNull() ?: 20
-                        onAdd(courseName.trim(), facultyName.trim(), att, cond, sess)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = dayProfile.primaryAccent),
-                enabled = courseName.isNotBlank()
-            ) {
-                Text("Add Course", color = Color.White)
             }
         },
         dismissButton = {

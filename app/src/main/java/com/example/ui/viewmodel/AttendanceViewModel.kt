@@ -32,7 +32,6 @@ data class AttendanceUiState(
     val criticalCount: Int = 0,
     val selectedFilter: AttendanceFilter = AttendanceFilter.ALL,
     val searchQuery: String = "",
-    val isSyncing: Boolean = false,
     val feedbackMessage: String? = null
 )
 
@@ -53,24 +52,17 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     private val _feedbackMessage = MutableStateFlow<String?>(null)
     val feedbackMessage: StateFlow<String?> = _feedbackMessage.asStateFlow()
 
-    val isSyncing: StateFlow<Boolean> = repository.isSyncing
-
     private val filterAndQuery = combine(_selectedFilter, _searchQuery) { filter, query ->
         Pair(filter, query)
-    }
-
-    private val syncAndFeedback = combine(repository.isSyncing, _feedbackMessage) { syncing, feedback ->
-        Pair(syncing, feedback)
     }
 
     val uiState: StateFlow<AttendanceUiState> = combine(
         repository.coursesProgressFlow,
         repository.overallProgressFlow,
         filterAndQuery,
-        syncAndFeedback
-    ) { courses, overall, filterQueryPair, syncFeedbackPair ->
+        _feedbackMessage
+    ) { courses, overall, filterQueryPair, feedback ->
         val (filter, query) = filterQueryPair
-        val (syncing, feedback) = syncFeedbackPair
 
         val safe = courses.count { it.zoneStatus == AttendanceZoneStatus.SAFE }
         val warning = courses.count { it.zoneStatus == AttendanceZoneStatus.WARNING }
@@ -99,7 +91,6 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
             criticalCount = critical,
             selectedFilter = filter,
             searchQuery = query,
-            isSyncing = syncing,
             feedbackMessage = feedback
         )
     }.stateIn(
@@ -118,6 +109,14 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     fun clearFeedback() {
         _feedbackMessage.value = null
+    }
+
+    /**
+     * Sets exact attended count for a subject (e.g. 2/2 or 1/2 present).
+     */
+    fun setAttendedCount(courseName: String, attended: Int) {
+        repository.setCourseAttendedCount(courseName, attended)
+        _feedbackMessage.value = "Updated $courseName attendance"
     }
 
     /**
@@ -161,35 +160,6 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Adds a new custom or elective course to the Room database.
-     */
-    fun addCourse(
-        courseName: String,
-        facultyName: String = "",
-        attended: Int = 0,
-        conducted: Int = 0,
-        totalSessions: Int = 20
-    ) {
-        viewModelScope.launch {
-            if (courseName.isBlank()) {
-                _feedbackMessage.value = "Course name cannot be empty"
-                return@launch
-            }
-            repository.addCourse(
-                courseName = courseName,
-                facultyName = facultyName,
-                attended = attended,
-                conducted = conducted,
-                totalSessions = totalSessions
-            )
-            _feedbackMessage.value = "Added course: $courseName"
-        }
-    }
-
-    /**
-     * Deletes a course from Room database.
-     */
     fun deleteCourse(courseId: Long) {
         viewModelScope.launch {
             repository.deleteCourse(courseId)
@@ -197,37 +167,10 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Resets Room DB to standard official Term courses.
-     */
     fun resetToOfficialCourses() {
         viewModelScope.launch {
-            repository.resetRoomToOfficialCourses()
-            _feedbackMessage.value = "Restored all 8 official courses to database"
+            repository.resetToOfficialTermCourses()
+            _feedbackMessage.value = "Restored all official Term II courses"
         }
-    }
-
-    /**
-     * Triggers LMS portal refresh.
-     */
-    fun syncWithLms() {
-        repository.triggerLmsSync { success ->
-            _feedbackMessage.value = if (success) {
-                "LMS attendance synced"
-            } else {
-                "LMS refresh failed"
-            }
-        }
-    }
-
-    /**
-     * Processes JSON payload extracted from LMS and updates Room database.
-     */
-    fun processLmsPayload(json: String, studentName: String? = null): Boolean {
-        val success = repository.processLmsExtractedAttendance(json, studentName)
-        if (success) {
-            _feedbackMessage.value = "Successfully synced attendance from LMS into database"
-        }
-        return success
     }
 }

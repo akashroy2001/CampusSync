@@ -800,7 +800,7 @@ fun NowDashboardScreen(
         if (onNavigateToAttendance != null) {
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Quick Link Card: Attendance & LMS
+            // Quick Link Card: Attendance Tracker
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -834,13 +834,13 @@ fun NowDashboardScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Attendance & LMS Portal",
+                                text = "Attendance Tracker",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = DarkTextPrimary
                             )
                             Text(
-                                text = "80% mandatory threshold • Auto-synced from LMS",
+                                text = "80% safe zone • Track present/absent per subject",
                                 fontSize = 12.sp,
                                 color = DarkTextSecondary
                             )

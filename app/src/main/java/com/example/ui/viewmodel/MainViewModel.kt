@@ -318,29 +318,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MessMenuRepository.getMenuForDayIndex(initialMessDayIndex)
     )
 
-    fun syncAttendanceWithLms() {
-        attendanceRepo.triggerLmsSync { success ->
-            if (success) {
-                _feedbackMessage.value = "Attendance refreshed with LMS portal"
-            }
-        }
-    }
-
-    fun processLmsAttendancePayload(jsonPayload: String, studentName: String? = null): Boolean {
-        val success = attendanceRepo.processLmsExtractedAttendance(jsonPayload, studentName)
-        if (success) {
-            _feedbackMessage.value = "Attendance successfully updated from LMS!"
-        }
-        return success
-    }
-
-    fun checkDailyAttendanceRefresh() {
-        attendanceRepo.checkDailyRefresh()
+    fun setSubjectAttendedCount(courseName: String, attended: Int) {
+        attendanceRepo.setCourseAttendedCount(courseName, attended)
+        _feedbackMessage.value = "Updated $courseName attendance"
     }
 
     fun resetAttendanceToOfficial() {
         attendanceRepo.resetToOfficialTermCourses()
-        _feedbackMessage.value = "Restored attendance for all 10 subjects (Term II)"
+        _feedbackMessage.value = "Restored attendance from Term II schedule"
     }
 
     fun updateSingleSubjectAttendance(courseName: String, attended: Int, conducted: Int) {
@@ -348,37 +333,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _feedbackMessage.value = "Updated $courseName attendance"
     }
 
-    fun recordAttendance(courseName: String, attended: Boolean) {
-        viewModelScope.launch {
-            val course = attendance.value.courses.firstOrNull { it.courseName == courseName }
-            if (course != null) {
-                val entity = attendanceRepo.dao.getCourseByName(courseName)
-                if (entity != null) {
-                    attendanceRepo.markAttendance(entity.id, attended)
-                } else {
-                    val newAtt = if (attended) course.attendedClasses + 1 else course.attendedClasses
-                    val newCond = course.totalConductedClasses + 1
-                    attendanceRepo.updateSingleSubject(courseName, newAtt, newCond)
-                }
-                _feedbackMessage.value = if (attended) "Marked Present for $courseName" else "Marked Absent for $courseName"
-            }
-        }
-    }
-
-    fun addNewCourse(courseName: String, facultyName: String, attended: Int, conducted: Int, totalSessions: Int) {
-        viewModelScope.launch {
-            attendanceRepo.addCourse(courseName, facultyName, attended, conducted, totalSessions)
-            _feedbackMessage.value = "Added course: $courseName"
-        }
-    }
-
     fun deleteCourse(courseName: String) {
         viewModelScope.launch {
-            val entity = attendanceRepo.dao.getCourseByName(courseName)
-            if (entity != null) {
-                attendanceRepo.deleteCourse(entity.id)
-                _feedbackMessage.value = "Deleted course: $courseName"
-            }
+            attendanceRepo.deleteCourseByName(courseName)
+            _feedbackMessage.value = "Removed $courseName"
         }
     }
 }

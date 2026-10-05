@@ -144,8 +144,6 @@ data class DayMessMenu(
     val meals: List<MealMenu>
 )
 
-const val IIMBG_LMS_URL = "https://lms.iimbg.ac.in/login/index.php"
-const val IIMBG_LMS_BASE = "https://lms.iimbg.ac.in"
 const val MANDATORY_ATTENDANCE_THRESHOLD = 80.0f
 
 data class CourseAttendance(
@@ -193,7 +191,7 @@ data class OverallAttendance(
     val courses: List<CourseAttendance>,
     val lastSyncTimestampMillis: Long = System.currentTimeMillis(),
     val isLmsConnected: Boolean = true,
-    val syncStatusText: String = "Synced from IIMBG LMS"
+    val syncStatusText: String = "Term II Attendance Synced"
 ) {
     val overallPercentage: Float
         get() = if (totalConducted > 0) {

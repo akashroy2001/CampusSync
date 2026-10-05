@@ -2,7 +2,6 @@ package com.example.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.webkit.CookieManager
 import com.example.data.local.AppDatabase
 import com.example.data.local.dao.AttendanceDao
 import com.example.data.local.entity.AttendanceLogEntity
@@ -11,7 +10,7 @@ import com.example.data.model.AttendanceZoneStatus
 import com.example.data.model.CourseAttendance
 import com.example.data.model.CourseAttendanceProgress
 import com.example.data.model.DaySchedule
-import com.example.data.model.IIMBG_LMS_BASE
+import com.example.data.model.MANDATORY_ATTENDANCE_THRESHOLD
 import com.example.data.model.OverallAttendance
 import com.example.data.model.OverallAttendanceProgress
 import com.example.data.model.REQUIRED_ATTENDANCE_THRESHOLD
@@ -20,22 +19,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Date
 import java.util.Locale
 
 class AttendanceRepository(private val context: Context) {
@@ -58,7 +48,7 @@ class AttendanceRepository(private val context: Context) {
                 totalConductedClasses = entity.totalConductedClasses,
                 totalTermSessions = entity.totalTermSessions,
                 requiredThreshold = entity.requiredThresholdPercentage,
-                isLmsSynced = entity.isLmsSynced,
+                isLmsSynced = false,
                 lastUpdatedTimestamp = entity.lastUpdatedTimestamp
             )
         }
@@ -68,18 +58,18 @@ class AttendanceRepository(private val context: Context) {
         calculateOverallProgress(list)
     }
 
-    private val _attendance = MutableStateFlow(loadStoredAttendance())
+    private val _attendance = MutableStateFlow(loadInitialAttendance())
     val attendance: StateFlow<OverallAttendance> = _attendance.asStateFlow()
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
+    private var latestSchedules: List<DaySchedule> = emptyList()
+
     init {
-        // Pre-populate Room DB if empty or sync with preferences
         scope.launch {
             initRoomDatabase()
         }
-        checkDailyRefresh()
     }
 
     private suspend fun initRoomDatabase() {
@@ -99,7 +89,6 @@ class AttendanceRepository(private val context: Context) {
             dao.deleteAllCourses()
             val term2Courses = getOfficialTermCourses()
             dao.insertCourses(term2Courses.map { CourseAttendanceEntity.fromDomain(it) })
-            prefs.edit().remove(KEY_LMS_COURSES_JSON).remove(KEY_HAS_CUSTOM_LMS_DATA).apply()
         }
 
         // Keep _attendance updated reactively from Room DB
@@ -108,11 +97,11 @@ class AttendanceRepository(private val context: Context) {
                 val domainCourses = entities.map { it.toDomain() }
                 val totalAtt = domainCourses.sumOf { it.attendedClasses }
                 val totalCond = domainCourses.sumOf { it.totalConductedClasses }
-                val current = _attendance.value
-                _attendance.value = current.copy(
+                _attendance.value = OverallAttendance(
                     totalAttended = totalAtt,
                     totalConducted = totalCond,
-                    courses = domainCourses
+                    courses = domainCourses,
+                    syncStatusText = "Term II Schedule Synced"
                 )
             }
         }
@@ -136,7 +125,175 @@ class AttendanceRepository(private val context: Context) {
         )
     }
 
-    // Room DB Direct Operations
+    /**
+     * Synchronizes conducted class counts for each Term II subject based on
+     * the timetable schedule for current day and all previous days.
+     */
+    fun updateFromTimetable(
+        schedules: List<DaySchedule>,
+        currentDate: LocalDate = LocalDate.now()
+    ) {
+        latestSchedules = schedules
+        val courseStats = mutableMapOf<String, Pair<Int, String>>()
+        val dtf1 = DateTimeFormatter.ofPattern("dd-MM-yyyy")
+        val dtf2 = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+
+        for (day in schedules) {
+            val parsedDate = try {
+                LocalDate.parse(day.dateStr, dtf1)
+            } catch (e: Exception) {
+                try { LocalDate.parse(day.dateStr, dtf2) } catch (e2: Exception) { null }
+            }
+
+            // Sync with current day and all previous classes of that subject
+            val isPastOrToday = parsedDate != null && !parsedDate.isAfter(currentDate)
+
+            if (isPastOrToday) {
+                for (item in day.classes) {
+                    if (item.isHoliday || item.isFreePeriod || item.courseName.isBlank()) continue
+                    val cleanName = cleanCourseTitle(item.courseName)
+                    val existing = courseStats[cleanName] ?: (0 to item.facultyName)
+                    val faculty = if (existing.second.isNotBlank()) existing.second else item.facultyName
+                    courseStats[cleanName] = (existing.first + 1 to faculty)
+                }
+            }
+        }
+
+        scope.launch {
+            val existingEntities = dao.getAllCourses()
+            val officialCourses = getOfficialTermCourses()
+
+            val updatedEntities = officialCourses.map { official ->
+                val stats = courseStats.entries.firstOrNull { matchesCourse(it.key, official.courseName) }?.value
+                val conducted = stats?.first ?: 0
+                val faculty = if (!stats?.second.isNullOrBlank()) stats!!.second else official.facultyName
+
+                val existing = existingEntities.firstOrNull { matchesCourse(it.courseName, official.courseName) }
+
+                val attended = if (existing != null) {
+                    if (existing.totalConductedClasses == 0 && conducted > 0) {
+                        // Newly conducted classes default to full attendance
+                        conducted
+                    } else {
+                        // Preserve user's manual selection, bounded between 0 and conducted
+                        existing.attendedClasses.coerceIn(0, conducted)
+                    }
+                } else {
+                    conducted
+                }
+
+                CourseAttendanceEntity(
+                    id = existing?.id ?: 0,
+                    courseName = official.courseName,
+                    facultyName = faculty,
+                    attendedClasses = attended,
+                    totalConductedClasses = conducted,
+                    totalTermSessions = official.totalTermSessions,
+                    requiredThresholdPercentage = MANDATORY_ATTENDANCE_THRESHOLD,
+                    isLmsSynced = false,
+                    lastUpdatedTimestamp = System.currentTimeMillis()
+                )
+            }
+
+            dao.insertCourses(updatedEntities)
+
+            val domainCourses = updatedEntities.map { it.toDomain() }
+            val totalAtt = domainCourses.sumOf { it.attendedClasses }
+            val totalCond = domainCourses.sumOf { it.totalConductedClasses }
+
+            _attendance.value = OverallAttendance(
+                totalAttended = totalAtt,
+                totalConducted = totalCond,
+                courses = domainCourses,
+                syncStatusText = "Term II Schedule Synced"
+            )
+        }
+    }
+
+    /**
+     * Sets the attended count for a subject (e.g. 2/2 or 1/2 present).
+     * Automatically constrained to 0..totalConductedClasses.
+     */
+    fun setCourseAttendedCount(courseName: String, attended: Int) {
+        scope.launch {
+            val entity = dao.getCourseByName(courseName) ?: return@launch
+            val clamped = attended.coerceIn(0, entity.totalConductedClasses)
+            dao.updateAttendanceCounts(entity.id, clamped, entity.totalConductedClasses)
+
+            dao.insertLog(
+                AttendanceLogEntity(
+                    courseId = entity.id,
+                    courseName = courseName,
+                    dateStr = LocalDate.now().toString(),
+                    wasAttended = clamped == entity.totalConductedClasses,
+                    note = "$clamped/${entity.totalConductedClasses} present"
+                )
+            )
+
+            // Update in-memory state immediately for instant UI responsiveness
+            val currentList = _attendance.value.courses.map { c ->
+                if (matchesCourse(c.courseName, courseName)) {
+                    c.copy(attendedClasses = clamped)
+                } else c
+            }
+            _attendance.value = _attendance.value.copy(
+                totalAttended = currentList.sumOf { it.attendedClasses },
+                totalConducted = currentList.sumOf { it.totalConductedClasses },
+                courses = currentList
+            )
+        }
+    }
+
+    /**
+     * Update attended and conducted numbers directly from edit dialog.
+     */
+    fun updateSingleSubject(courseName: String, attended: Int, conducted: Int, faculty: String = "") {
+        scope.launch {
+            val existing = dao.getCourseByName(courseName)
+            val cleanCond = conducted.coerceAtLeast(0)
+            val cleanAtt = attended.coerceIn(0, cleanCond)
+
+            if (existing != null) {
+                val updated = existing.copy(
+                    attendedClasses = cleanAtt,
+                    totalConductedClasses = cleanCond,
+                    facultyName = if (faculty.isNotBlank()) faculty else existing.facultyName,
+                    lastUpdatedTimestamp = System.currentTimeMillis()
+                )
+                dao.updateCourse(updated)
+            } else {
+                dao.insertCourse(
+                    CourseAttendanceEntity(
+                        courseName = courseName,
+                        facultyName = faculty,
+                        attendedClasses = cleanAtt,
+                        totalConductedClasses = cleanCond,
+                        totalTermSessions = 20,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            val currentList = _attendance.value.courses.map { c ->
+                if (matchesCourse(c.courseName, courseName)) {
+                    c.copy(
+                        attendedClasses = cleanAtt,
+                        totalConductedClasses = cleanCond,
+                        facultyName = if (faculty.isNotBlank()) faculty else c.facultyName
+                    )
+                } else c
+            }
+            _attendance.value = _attendance.value.copy(
+                totalAttended = currentList.sumOf { it.attendedClasses },
+                totalConducted = currentList.sumOf { it.totalConductedClasses },
+                courses = currentList
+            )
+        }
+    }
+
+    /**
+     * Quick mark attendance (+1 attended if present, +1 conducted).
+     */
     suspend fun markAttendance(courseId: Long, attended: Boolean, note: String = "") {
         withContext(Dispatchers.IO) {
             val entity = dao.getCourseById(courseId) ?: return@withContext
@@ -203,401 +360,40 @@ class AttendanceRepository(private val context: Context) {
         }
     }
 
-    suspend fun resetRoomToOfficialCourses() {
-        withContext(Dispatchers.IO) {
-            dao.deleteAllCourses()
-            val official = getOfficialTermCourses().map { CourseAttendanceEntity.fromDomain(it) }
-            dao.insertCourses(official)
-        }
-        resetToOfficialTermCourses()
-    }
-
-    /**
-     * Checks if the stored attendance was synced on a prior calendar day.
-     */
-    fun checkDailyRefresh() {
-        val lastSync = prefs.getLong(KEY_LAST_LMS_SYNC_TIMESTAMP, 0L)
-        val now = System.currentTimeMillis()
-
-        if (lastSync == 0L) {
-            prefs.edit().putLong(KEY_LAST_LMS_SYNC_TIMESTAMP, now).apply()
-            return
-        }
-
-        val lastDate = Instant.ofEpochMilli(lastSync).atZone(ZoneId.systemDefault()).toLocalDate()
-        val today = LocalDate.now()
-
-        if (lastDate.isBefore(today)) {
-            refreshFromLmsDaily(lastDate, today)
-        }
-    }
-
-    /**
-     * Intelligently processes attendance payload extracted from the Moodle LMS portal.
-     * Merges incoming subjects and writes to Room database.
-     */
-    fun processLmsExtractedAttendance(jsonPayload: String, studentName: String? = null): Boolean {
-        try {
-            val root = JSONObject(jsonPayload)
-            val coursesArray = root.optJSONArray("courses") ?: JSONArray()
-            if (coursesArray.length() == 0) return false
-
-            val incomingList = mutableListOf<CourseAttendance>()
-            for (i in 0 until coursesArray.length()) {
-                val item = coursesArray.getJSONObject(i)
-                val rawCourseName = item.optString("courseName", "").trim()
-                if (rawCourseName.isBlank()) continue
-
-                val faculty = item.optString("facultyName", "").trim()
-                val attended = item.optInt("attended", 0)
-                val conducted = item.optInt("conducted", 0)
-                val totalSessions = item.optInt("totalSessions", 20)
-
-                if (conducted >= 0 && attended >= 0) {
-                    incomingList.add(
-                        CourseAttendance(
-                            courseName = cleanCourseTitle(rawCourseName),
-                            facultyName = faculty,
-                            attendedClasses = if (conducted > 0) attended.coerceIn(0, conducted) else 0,
-                            totalConductedClasses = conducted.coerceAtLeast(0),
-                            totalTermSessions = if (totalSessions > 0) totalSessions else 20,
-                            isLmsSynced = true
-                        )
-                    )
-                }
-            }
-
-            if (incomingList.isEmpty()) return false
-
-            val currentList = _attendance.value.courses.ifEmpty { getOfficialTermCourses() }.toMutableList()
-
-            for (incoming in incomingList) {
-                val existingIndex = currentList.indexOfFirst { matchesCourse(it.courseName, incoming.courseName) }
-                if (existingIndex != -1) {
-                    val old = currentList[existingIndex]
-                    currentList[existingIndex] = old.copy(
-                        attendedClasses = incoming.attendedClasses,
-                        totalConductedClasses = incoming.totalConductedClasses,
-                        totalTermSessions = if (incoming.totalTermSessions > 0) incoming.totalTermSessions else old.totalTermSessions,
-                        facultyName = if (incoming.facultyName.isNotBlank()) incoming.facultyName else old.facultyName,
-                        isLmsSynced = true
-                    )
-                } else {
-                    currentList.add(incoming)
-                }
-            }
-
-            val defaultOfficial = getOfficialTermCourses()
-            for (official in defaultOfficial) {
-                if (currentList.none { matchesCourse(it.courseName, official.courseName) }) {
-                    currentList.add(official)
-                }
-            }
-
-            val now = System.currentTimeMillis()
-            val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(now))
-            val statusText = if (incomingList.size == 1) {
-                "Updated ${incomingList[0].courseName} from All Tab ($timeStr)"
-            } else {
-                "All ${incomingList.size} subjects synced from LMS All Tab ($timeStr)"
-            }
-
-            persistLmsAttendance(
-                courses = currentList,
-                syncTimestamp = now,
-                statusText = statusText,
-                studentName = studentName
-            )
-
-            // Sync to Room Database
-            scope.launch {
-                val entities = currentList.map { CourseAttendanceEntity.fromDomain(it) }
-                dao.insertCourses(entities)
-            }
-
-            return true
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return false
-    }
-
-    fun updateSingleSubject(courseName: String, attended: Int, conducted: Int, faculty: String = "") {
-        val json = JSONObject().apply {
-            val arr = JSONArray().apply {
-                put(JSONObject().apply {
-                    put("courseName", courseName)
-                    put("attended", attended)
-                    put("conducted", conducted)
-                    put("facultyName", faculty)
-                })
-            }
-            put("courses", arr)
-        }
-        processLmsExtractedAttendance(json.toString())
-    }
-
-    fun refreshFromLmsDaily(previousDate: LocalDate, currentDate: LocalDate) {
-        val current = _attendance.value
-        val now = System.currentTimeMillis()
-        val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(now))
-
-        val updated = current.copy(
-            lastSyncTimestampMillis = now,
-            syncStatusText = "Auto-refreshed today at $timeStr (Daily Sync)"
-        )
-        _attendance.value = updated
-        prefs.edit()
-            .putLong(KEY_LAST_LMS_SYNC_TIMESTAMP, now)
-            .putString(KEY_SYNC_STATUS_TEXT, updated.syncStatusText)
-            .apply()
-    }
-
-    fun updateFromTimetable(schedules: List<DaySchedule>, currentDate: LocalDate = LocalDate.now(), currentTime: LocalTime = LocalTime.now()) {
-        val hasLmsData = prefs.getBoolean(KEY_HAS_CUSTOM_LMS_DATA, false)
-        if (hasLmsData) {
-            return
-        }
-
-        val courseStats = mutableMapOf<String, Pair<Int, String>>()
-        val dtf1 = DateTimeFormatter.ofPattern("dd-MM-yyyy")
-        val dtf2 = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-        val currentMin = currentTime.hour * 60 + currentTime.minute
-
-        for (day in schedules) {
-            val parsedDate = try {
-                LocalDate.parse(day.dateStr, dtf1)
-            } catch (e: Exception) {
-                try { LocalDate.parse(day.dateStr, dtf2) } catch (e2: Exception) { null }
-            }
-
-            val isPastDay = parsedDate != null && parsedDate.isBefore(currentDate)
-            val isToday = parsedDate != null && parsedDate.isEqual(currentDate)
-
-            if (isPastDay || isToday) {
-                for (item in day.classes) {
-                    if (item.isHoliday || item.isFreePeriod || item.courseName.isBlank()) continue
-                    val wasConducted = if (isPastDay) true else item.slot.startMinutes <= currentMin
-                    if (wasConducted) {
-                        val cleanName = cleanCourseTitle(item.courseName)
-                        val existing = courseStats[cleanName] ?: (0 to item.facultyName)
-                        courseStats[cleanName] = (existing.first + 1 to (if (existing.second.isNotBlank()) existing.second else item.facultyName))
-                    }
-                }
-            }
-        }
-
-        val fallback = getOfficialTermCourses()
-        val mergedList = fallback.map { c ->
-            val stats = courseStats.entries.firstOrNull { matchesCourse(c.courseName, it.key) }?.value
-            if (stats != null) {
-                val conducted = stats.first
-                val defaultAttended = (conducted * 0.88f).toInt().coerceAtLeast((conducted - 1).coerceAtLeast(0))
-                c.copy(
-                    facultyName = if (c.facultyName.isNotBlank()) c.facultyName else stats.second,
-                    attendedClasses = defaultAttended.coerceIn(0, conducted),
-                    totalConductedClasses = conducted
-                )
-            } else {
-                c
-            }
-        }
-
-        val totalAtt = mergedList.sumOf { it.attendedClasses }
-        val totalCond = mergedList.sumOf { it.totalConductedClasses }
-        val now = System.currentTimeMillis()
-        val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(now))
-
-        _attendance.value = OverallAttendance(
-            totalAttended = totalAtt,
-            totalConducted = totalCond,
-            courses = mergedList,
-            lastSyncTimestampMillis = now,
-            isLmsConnected = true,
-            syncStatusText = "LMS Data Synced (Auto-refreshed today at $timeStr)"
-        )
-
-        // Write to Room DB
+    fun deleteCourseByName(courseName: String) {
         scope.launch {
-            val entities = mergedList.map { CourseAttendanceEntity.fromDomain(it) }
-            dao.insertCourses(entities)
-        }
-    }
-
-    fun triggerLmsSync(onComplete: (Boolean) -> Unit = {}) {
-        scope.launch {
-            _isSyncing.value = true
-            try {
-                val cookieManager = CookieManager.getInstance()
-                val cookies = cookieManager.getCookie(IIMBG_LMS_BASE)
-
-                val now = System.currentTimeMillis()
-                val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(now))
-
-                withContext(Dispatchers.Main) {
-                    val current = _attendance.value
-                    _attendance.value = current.copy(
-                        lastSyncTimestampMillis = now,
-                        syncStatusText = if (!cookies.isNullOrBlank() && cookies.contains("MoodleSession")) {
-                            "Synced with LMS portal today at $timeStr"
-                        } else {
-                            "Auto-refreshed with LMS schedule today at $timeStr"
-                        }
-                    )
-                    prefs.edit()
-                        .putLong(KEY_LAST_LMS_SYNC_TIMESTAMP, now)
-                        .putString(KEY_SYNC_STATUS_TEXT, _attendance.value.syncStatusText)
-                        .apply()
-                    _isSyncing.value = false
-                    onComplete(true)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _isSyncing.value = false
-                    onComplete(false)
-                }
+            val entity = dao.getCourseByName(courseName)
+            if (entity != null) {
+                dao.deleteCourseById(entity.id)
             }
         }
     }
 
     fun resetToOfficialTermCourses() {
-        val official = getOfficialTermCourses()
-        val totalAtt = official.sumOf { it.attendedClasses }
-        val totalCond = official.sumOf { it.totalConductedClasses }
-        val now = System.currentTimeMillis()
-
-        prefs.edit().remove(KEY_LMS_COURSES_JSON).remove(KEY_HAS_CUSTOM_LMS_DATA).apply()
-        _attendance.value = OverallAttendance(
-            totalAttended = totalAtt,
-            totalConducted = totalCond,
-            courses = official,
-            lastSyncTimestampMillis = now,
-            isLmsConnected = true,
-            syncStatusText = "Restored all 10 subjects with Term II records"
-        )
-
-        scope.launch {
-            dao.deleteAllCourses()
-            dao.insertCourses(official.map { CourseAttendanceEntity.fromDomain(it) })
-        }
-    }
-
-    private fun persistLmsAttendance(
-        courses: List<CourseAttendance>,
-        syncTimestamp: Long,
-        statusText: String,
-        studentName: String?
-    ) {
-        val arr = JSONArray()
-        for (c in courses) {
-            val obj = JSONObject()
-            obj.put("courseName", c.courseName)
-            obj.put("facultyName", c.facultyName)
-            obj.put("attended", c.attendedClasses)
-            obj.put("conducted", c.totalConductedClasses)
-            obj.put("totalSessions", c.totalTermSessions)
-            arr.put(obj)
-        }
-
-        prefs.edit()
-            .putString(KEY_LMS_COURSES_JSON, arr.toString())
-            .putLong(KEY_LAST_LMS_SYNC_TIMESTAMP, syncTimestamp)
-            .putString(KEY_SYNC_STATUS_TEXT, statusText)
-            .putBoolean(KEY_HAS_CUSTOM_LMS_DATA, true)
-            .apply()
-
-        if (!studentName.isNullOrBlank()) {
-            prefs.edit().putString(KEY_LMS_STUDENT_NAME, studentName).apply()
-        }
-
-        val totalAtt = courses.sumOf { it.attendedClasses }
-        val totalCond = courses.sumOf { it.totalConductedClasses }
-
-        _attendance.value = OverallAttendance(
-            totalAttended = totalAtt,
-            totalConducted = totalCond,
-            courses = courses,
-            lastSyncTimestampMillis = syncTimestamp,
-            isLmsConnected = true,
-            syncStatusText = statusText
-        )
-    }
-
-    private fun loadStoredAttendance(): OverallAttendance {
-        val jsonString = prefs.getString(KEY_LMS_COURSES_JSON, null)
-        val lastSync = prefs.getLong(KEY_LAST_LMS_SYNC_TIMESTAMP, System.currentTimeMillis())
-        val statusText = prefs.getString(KEY_SYNC_STATUS_TEXT, "MBA 2026-28 • Term II") ?: "MBA 2026-28 • Term II"
-
-        if (!jsonString.isNullOrBlank()) {
-            try {
-                val courses = mutableListOf<CourseAttendance>()
-                val arr = JSONArray(jsonString)
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    val rawName = obj.optString("courseName")
-                    if (rawName.isNotBlank()) {
-                        courses.add(
-                            CourseAttendance(
-                                courseName = cleanCourseTitle(rawName),
-                                facultyName = obj.optString("facultyName"),
-                                attendedClasses = obj.optInt("attended"),
-                                totalConductedClasses = obj.optInt("conducted"),
-                                totalTermSessions = obj.optInt("totalSessions", 20),
-                                isLmsSynced = false
-                            )
-                        )
-                    }
-                }
-
-                val officialCourses = getOfficialTermCourses()
-                val hasOldTerm1Data = courses.any {
-                    it.courseName.contains("Microeconomics") ||
-                    it.courseName.contains("Sustainable") ||
-                    it.courseName.contains("Information Technology") ||
-                    it.courseName.contains("Written Analysis") ||
-                    it.courseName.contains("Statistics") ||
-                    it.courseName.contains("Marketing Management I") ||
-                    it.courseName.contains("Management Accounting I") ||
-                    it.courseName.contains("Organizational Behaviour I")
-                }
-
-                val finalCourses = if (hasOldTerm1Data || courses.isEmpty()) {
-                    officialCourses
-                } else {
-                    val mergedCourses = courses.toMutableList()
-                    for (off in officialCourses) {
-                        if (mergedCourses.none { matchesCourse(it.courseName, off.courseName) }) {
-                            mergedCourses.add(off)
-                        }
-                    }
-                    mergedCourses
-                }
-
-                val totalAtt = finalCourses.sumOf { it.attendedClasses }
-                val totalCond = finalCourses.sumOf { it.totalConductedClasses }
-                return OverallAttendance(
-                    totalAttended = totalAtt,
-                    totalConducted = totalCond,
-                    courses = finalCourses,
-                    lastSyncTimestampMillis = lastSync,
-                    isLmsConnected = true,
-                    syncStatusText = statusText
-                )
-            } catch (e: Exception) {
-                // fallback to default
+        if (latestSchedules.isNotEmpty()) {
+            updateFromTimetable(latestSchedules)
+        } else {
+            val official = getOfficialTermCourses()
+            scope.launch {
+                dao.deleteAllCourses()
+                dao.insertCourses(official.map { CourseAttendanceEntity.fromDomain(it) })
             }
+            _attendance.value = OverallAttendance(
+                totalAttended = 0,
+                totalConducted = 0,
+                courses = official,
+                syncStatusText = "Term II Attendance Reset"
+            )
         }
+    }
 
+    private fun loadInitialAttendance(): OverallAttendance {
         val defaultList = getOfficialTermCourses()
-        val totalAtt = defaultList.sumOf { it.attendedClasses }
-        val totalCond = defaultList.sumOf { it.totalConductedClasses }
         return OverallAttendance(
-            totalAttended = totalAtt,
-            totalConducted = totalCond,
+            totalAttended = 0,
+            totalConducted = 0,
             courses = defaultList,
-            lastSyncTimestampMillis = lastSync,
-            isLmsConnected = true,
-            syncStatusText = "All 10 Subjects Initialized • Term II"
+            syncStatusText = "MBA 2026-28 • Term II"
         )
     }
 
@@ -685,12 +481,7 @@ class AttendanceRepository(private val context: Context) {
     }
 
     companion object {
-        private const val PREFS_NAME = "campussync_attendance_lms_prefs"
-        private const val KEY_LMS_COURSES_JSON = "lms_attendance_courses_json"
-        private const val KEY_LAST_LMS_SYNC_TIMESTAMP = "last_lms_sync_timestamp"
-        private const val KEY_SYNC_STATUS_TEXT = "lms_sync_status_text"
-        private const val KEY_LMS_STUDENT_NAME = "lms_student_name"
-        private const val KEY_HAS_CUSTOM_LMS_DATA = "has_custom_lms_data"
+        private const val PREFS_NAME = "campussync_attendance_prefs"
 
         @Volatile
         private var INSTANCE: AttendanceRepository? = null
