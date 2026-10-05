@@ -1,0 +1,50 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Base calendar card -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,28h44c3.3,0 6,2.7 6,6v44c0,3.3 -2.7,6 -6,6H32c-3.3,0 -6,-2.7 -6,-6V34c0,-3.3 2.7,-6 6,-6z" />
+    
+    <!-- Top header bar of timetable -->
+    <path
+        android:fillColor="#4F46E5"
+        android:pathData="M26,34c0,-3.3 2.7,-6 6,-6h44c3.3,0 6,2.7 6,6v10H26V34z" />
+    
+    <!-- Calendar rings -->
+    <path
+        android:fillColor="#E0E7FF"
+        android:pathData="M38,24h4v8h-4zM66,24h4v8h-4z" />
+
+    <!-- Schedule grid cells inside -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M32,50h18v6H32z" />
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,50h22v6H54z" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M32,60h26v6H32z" />
+    <path
+        android:fillColor="#EC4899"
+        android:pathData="M62,60h14v6H62z" />
+
+    <!-- Live indicator circle badge -->
+    <path
+        android:fillColor="#059669"
+        android:pathData="M32,70h12v4H32z" />
+    <path
+        android:fillColor="#3B82F6"
+        android:pathData="M48,70h28v4H48z" />
+
+    <!-- Mini clock/pulse emblem in corner -->
+    <path
+        android:fillColor="#4338CA"
+        android:pathData="M70,68a10,10 0 1,0 20,0a10,10 0 1,0 -20,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M80,62a6,6 0 1,0 0,12a6,6 0 0,0 0,-12zm0.5,3v3.2l2.2,1.3l-0.7,1.2l-2.5,-1.5V65h1z" />
+</vector>
